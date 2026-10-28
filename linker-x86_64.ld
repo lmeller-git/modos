@@ -12,6 +12,7 @@ PHDRS
     text    PT_LOAD;
     rodata  PT_LOAD;
     data    PT_LOAD;
+    eh_frame_hdr PT_GNU_EH_FRAME; /* GNU unwind header segment */
 }
 
 SECTIONS
@@ -31,6 +32,21 @@ SECTIONS
 
     .rodata : {
         *(.rodata .rodata.*)
+    } :rodata
+
+    /* Linker-generated fast binary search lookup table for DWARF frames */
+    .eh_frame_hdr : {
+        __eh_frame_hdr_start = .;
+        *(.eh_frame_hdr .eh_frame_hdr.*)
+        __eh_frame_hdr_end = .;
+    } :rodata :eh_frame_hdr
+
+    /* DWARF Call Frame Information (CFI) for stack unwinding */
+    .eh_frame : {
+        . = ALIGN(8);
+        __eh_frame_start = .;
+        KEEP(*(.eh_frame .eh_frame.*))
+        __eh_frame_end = .;
     } :rodata
 
     /* Move to the next memory page for .data */
@@ -65,9 +81,8 @@ SECTIONS
     } :data
 
 
-    /* Discard .note.* and .eh_frame* since they may cause issues on some hosts. */
+    /* Discard .note.* since they may cause issues on some hosts. */
     /DISCARD/ : {
-        *(.eh_frame*)
         *(.note .note.*)
     }
 }
