@@ -1,16 +1,20 @@
 #![no_std]
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use core::ptr::NonNull;
+
+mod limine;
+
+pub struct BootLoaderInfo {
+    pub name: &'static str,
+    pub version: &'static str,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct BootInfo {
+    pub hhdm_offset: Option<usize>,
+    pub bootloader_info: Option<BootLoaderInfo>,
+    pub rsdp_addr: Option<NonNull<()>>,
+}
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub fn build_bootinfo() -> BootInfo {
+    limine::build_bootinfo()
 }

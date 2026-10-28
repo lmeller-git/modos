@@ -11,6 +11,8 @@ categories.workspace = true
 description.workspace = true
 
 [dependencies]
+boot = { path = "../boot" }
+arch-x86_64 = { path = "../arch-x86_64" }
 
 [lints]
 workspace = true

@@ -4,13 +4,16 @@
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
+use arch_x86_64::exit;
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
-    loop {}
+    let _boot_info = boot::build_bootinfo();
+    exit(0)
 }
 
 #[cfg(not(test))]
 #[panic_handler]
 fn kernel_panic(_: &PanicInfo<'_>) -> ! {
-    loop {}
+    exit(1)
 }

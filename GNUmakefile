@@ -16,7 +16,7 @@ CARGO_TARGET_DIR ?= target
 IMAGE_NAME       ?= tiny_os
 QEMUFLAGS        ?= -m 12G
 QEMU_WRAPPER     ?= ./scripts/run_qemu.sh
-LIMINE_BRANCH    ?= v9.x-binary
+LIMINE_BRANCH    ?= v11.x-binary
 
 # Set KVM=1 for anything performance related
 KVM ?=
@@ -33,7 +33,7 @@ KERNEL_PKG    ?= kernel
 KERNEL_BIN    ?= kernel
 KERNEL_TARGET ?= x86_64-unknown-none
 
-KERNEL_RUSTFLAGS ?= -C relocation-model=static
+KERNEL_RUSTFLAGS ?= -C relocation-model=static -C link-arg=-Tlinker-x86_64.ld
 
 PROFILE_DIR := $(if $(filter dev,$(RUST_PROFILE)),debug,$(RUST_PROFILE))
 KERNEL_ELF  := $(CARGO_TARGET_DIR)/$(KERNEL_TARGET)/$(PROFILE_DIR)/$(KERNEL_BIN)
