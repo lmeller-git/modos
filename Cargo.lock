@@ -11,15 +11,15 @@ name = "boot"
 version = "0.1.0"
 
 [[package]]
-name = "entry"
-version = "0.1.0"
-
-[[package]]
 name = "executor"
 version = "0.1.0"
 
 [[package]]
 name = "instrument"
+version = "0.1.0"
+
+[[package]]
+name = "kernel"
 version = "0.1.0"
 
 [[package]]

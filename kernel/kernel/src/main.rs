@@ -4,10 +4,13 @@
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
-pub fn kernel_main() {}
+#[unsafe(no_mangle)]
+unsafe extern "C" fn _start() -> ! {
+    loop {}
+}
 
 #[cfg(not(test))]
 #[panic_handler]
-fn panic_handler(_: &PanicInfo<'_>) -> ! {
+fn kernel_panic(_: &PanicInfo<'_>) -> ! {
     loop {}
 }

@@ -28,9 +28,9 @@ HOST_TEST_PKGS ?=
 # ---------------------------------------------------------------------------
 
 # Cargo package of the kernel binary.
-KERNEL_PKG    ?= entry
+KERNEL_PKG    ?= kernel
 # Produced binary, same as limine path
-KERNEL_BIN    ?= entry
+KERNEL_BIN    ?= kernel
 KERNEL_TARGET ?= x86_64-unknown-none
 
 KERNEL_RUSTFLAGS ?= -C relocation-model=static
