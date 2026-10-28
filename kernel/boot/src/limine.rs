@@ -9,6 +9,7 @@ use limine::{
         BootloaderInfoRequest,
         FramebufferRequest,
         HhdmRequest,
+        MemmapRequest,
         PagingModeRequest,
         RsdpRequest,
     },
@@ -43,6 +44,10 @@ pub(crate) static PAGING_MODE_REQUEST: PagingModeRequest = PagingModeRequest::ne
 
 #[used]
 #[unsafe(link_section = ".requests")]
+pub(crate) static MEMORY_MAP_REQUEST: MemmapRequest = MemmapRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
 pub(crate) static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 #[used]
@@ -66,6 +71,11 @@ pub(crate) fn build_bootinfo() -> BootInfo {
         version: response.version(),
     });
 
+    let memmap = MEMORY_MAP_REQUEST.response().map(
+        |response| // SAFETY: crate::Entry is the same repr(C) struct as used in limine
+    unsafe { core::mem::transmute(response.entries()) },
+    );
+
     BootInfo {
         hhdm_offset: HHDM_REQUEST
             .response()
@@ -74,5 +84,6 @@ pub(crate) fn build_bootinfo() -> BootInfo {
         rsdp_addr: RSDP_REQUEST
             .response()
             .and_then(|response| NonNull::new(response.address)),
+        memmap,
     }
 }

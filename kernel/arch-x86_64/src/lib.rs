@@ -2,9 +2,13 @@
 
 use core::fmt::Arguments;
 
+use boot::BootInfo;
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
+use x86_64::registers::control::{Cr4, Cr4Flags};
 
+pub mod frame;
+pub mod page;
 mod qemu;
 
 static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
@@ -15,6 +19,20 @@ static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
 
 pub fn exit(code: usize) -> ! {
     qemu::exit_qemu(qemu::QemuExitCode::from_usize(code));
+}
+
+pub fn early_init(boot_info: &BootInfo) {
+    frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
+    init_xmm();
+}
+
+fn init_xmm() {
+    unsafe {
+        Cr4::update(|cr4| {
+            cr4.insert(Cr4Flags::OSFXSR);
+            cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
+        });
+    }
 }
 
 pub fn _serial_print(args: Arguments<'_>) {

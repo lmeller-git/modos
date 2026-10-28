@@ -10,6 +10,8 @@ repository.workspace = true
 uart_16550 = "0.3.2"
 spin = { workspace = true }
 x86_64 = { workspace = true }
+boot = { path = "../boot" }
+conquer-once = { workspace = true }
 
 [lints]
 workspace = true

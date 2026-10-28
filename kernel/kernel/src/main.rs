@@ -8,8 +8,10 @@ use arch_x86_64::{exit, serial_println};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
-    let _boot_info = boot::build_bootinfo();
+    let boot_info = boot::build_bootinfo();
     serial_println!("Hello there!");
+    arch_x86_64::early_init(&boot_info);
+    // TODO heap then irq then ...
     exit(0)
 }
 
