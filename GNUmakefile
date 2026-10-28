@@ -1,306 +1,179 @@
-# Nuke built-in rules and variables.
+# Build system for the workspace (x86_64, UEFI via Limine).
+#
+# Host requirements: cargo (toolchain pinned in rust-toolchain.toml),
+# qemu-system-x86_64, xorriso, git, curl.
+
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-# Convenience macro to reliably declare user overridable variables.
-override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval override $(1) := $(2)))
+# ---------------------------------------------------------------------------
+# user settings
+# ---------------------------------------------------------------------------
 
-# Target architecture to build for. Default to x86_64.
-$(call USER_VARIABLE,KARCH,x86_64)
+RUST_PROFILE     ?= dev
+CARGO_FLAGS      ?=
+CARGO_TARGET_DIR ?= target
+IMAGE_NAME       ?= tiny_os
+QEMUFLAGS        ?= -m 12G
+QEMU_WRAPPER     ?= ./scripts/run_qemu.sh
+LIMINE_BRANCH    ?= v9.x-binary
 
-# Default user QEMU flags. These are appended to the QEMU command calls.
-$(call USER_VARIABLE,QEMUFLAGS,-m 12G)
+# Set KVM=1 for anything performance related
+KVM ?=
 
-IMAGE_NAME ?= tiny_os-$(KARCH)
-CARGO_TARGET_DIR ?= target/
-CARGO_FLAGS ?=
-RUST_PROFILE ?= dev
-KERNEL_BIN ?= kernel
-QEMU_WRAPPER = ./run_qemu.sh
+HOST_TEST_PKGS ?=
 
-export KARCH IMAGE_NAME CARGO_TARGET_DIR CARGO_FLAGS RUST_PROFILE KERNEL_BIN QEMUFLAGS
+# ---------------------------------------------------------------------------
+# Kernel build
+# ---------------------------------------------------------------------------
+
+# Cargo package of the kernel binary.
+KERNEL_PKG    ?= entry
+# Produced binary, same as limine path
+KERNEL_BIN    ?= entry
+KERNEL_TARGET ?= x86_64-unknown-none
+
+KERNEL_RUSTFLAGS ?= -C relocation-model=static
+
+PROFILE_DIR := $(if $(filter dev,$(RUST_PROFILE)),debug,$(RUST_PROFILE))
+KERNEL_ELF  := $(CARGO_TARGET_DIR)/$(KERNEL_TARGET)/$(PROFILE_DIR)/$(KERNEL_BIN)
+ISO         := $(IMAGE_NAME).iso
+
+KERNEL_ENV  := RUSTFLAGS="$(KERNEL_RUSTFLAGS)"
+KERNEL_ARGS := --target $(KERNEL_TARGET) --profile $(RUST_PROFILE) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
+
+# ---------------------------------------------------------------------------
+# Boot environment
+# ---------------------------------------------------------------------------
+
+LIMINE_DIR := limine
+
+OVMF_DIR  := ovmf
+OVMF_CODE := $(OVMF_DIR)/ovmf-code-x86_64.fd
+OVMF_VARS := $(OVMF_DIR)/ovmf-vars-x86_64.fd
+OVMF_BASE := https://github.com/osdev0/edk2-ovmf-nightly/releases
+# Known-good nightly, used if "latest" cannot be downloaded. Bump now and then.
+# TODO: migrate to https://github.com/rust-osdev/ovmf-prebuilt/
+OVMF_FALLBACK := nightly-20251203T012444Z
+
+ifneq ($(KVM),)
+override QEMUFLAGS += -enable-kvm -cpu host,+invtsc
+endif
+
+# ---------------------------------------------------------------------------
+# Targets
+# ---------------------------------------------------------------------------
 
 .PHONY: all
-all: $(IMAGE_NAME).iso
+all: $(ISO)
 
-.PHONY: all-hdd
-all-hdd: $(IMAGE_NAME).hdd
+# Always invoke cargo (it does its own change detection). Make only rebuilds the
+# ISO if cargo actually changed the binary.
+.PHONY: kernel
+kernel: $(KERNEL_ELF)
+
+$(KERNEL_ELF): FORCE
+	$(KERNEL_ENV) cargo build -p $(KERNEL_PKG) $(KERNEL_ARGS)
+
+FORCE:
+
+# Type-check / lint everything in default-members for the kernel target.
+.PHONY: check
+check:
+	$(KERNEL_ENV) cargo check $(KERNEL_ARGS)
+
+.PHONY: clippy
+clippy:
+	$(KERNEL_ENV) cargo clippy $(KERNEL_ARGS)
+
+# UEFI-only bootable ISO.
+$(ISO): $(KERNEL_ELF) limine.conf $(LIMINE_DIR)/BOOTX64.EFI
+	rm -rf iso_root
+	mkdir -p iso_root/boot/limine iso_root/EFI/BOOT
+	cp $(KERNEL_ELF) iso_root/boot/$(KERNEL_BIN)
+	cp limine.conf iso_root/boot/limine/
+	cp $(LIMINE_DIR)/limine-uefi-cd.bin iso_root/boot/limine/
+	cp $(LIMINE_DIR)/BOOTX64.EFI iso_root/EFI/BOOT/
+	xorriso -as mkisofs \
+		--efi-boot boot/limine/limine-uefi-cd.bin \
+		-efi-boot-part --efi-boot-image --protective-msdos-label \
+		iso_root -o $@
+	rm -rf iso_root
+
+$(LIMINE_DIR)/BOOTX64.EFI:
+	rm -rf $(LIMINE_DIR)
+	git clone https://github.com/limine-bootloader/limine.git --branch=$(LIMINE_BRANCH) --depth=1 $(LIMINE_DIR)
+
+$(OVMF_DIR)/ovmf-%-x86_64.fd:
+	mkdir -p $(OVMF_DIR)
+	curl -fLo $@ $(OVMF_BASE)/latest/download/$(@F) \
+		|| curl -fLo $@ $(OVMF_BASE)/download/$(OVMF_FALLBACK)/$(@F) \
+		|| { rm -f $@; echo "OVMF download failed"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Running and testing
+# ---------------------------------------------------------------------------
 
 .PHONY: run
-run:
-	$(MAKE) run-$(KARCH)
+run: $(ISO) $(OVMF_CODE) $(OVMF_VARS)
+	$(QEMU_WRAPPER) qemu-system-x86_64 \
+		-M q35 \
+		-drive if=pflash,unit=0,format=raw,file=$(OVMF_CODE),readonly=on \
+		-drive if=pflash,unit=1,format=raw,file=$(OVMF_VARS) \
+		-cdrom $(ISO) \
+		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+		-serial stdio \
+		$(QEMUFLAGS)
 
 .PHONY: debug
 debug:
 	$(MAKE) run QEMUFLAGS="$(QEMUFLAGS) -s -S"
 
+# In-kernel tests: build with the test_run feature into a separate target dir and
+# image so normal and test builds do not clobber each other.
+.PHONY: test-qemu
+test-qemu:
+	$(MAKE) run \
+		IMAGE_NAME=$(IMAGE_NAME)-test \
+		CARGO_TARGET_DIR=$(CARGO_TARGET_DIR)/test \
+		CARGO_FLAGS="$(CARGO_FLAGS) --features test_run" \
+		QEMUFLAGS="$(QEMUFLAGS) -display none"
+
+# Test with debug flags for gdb
 .PHONY: debug-test
 debug-test:
-	$(MAKE) test QEMUFLAGS="$(QEMUFLAGS) -s -S"
+	$(MAKE) test-qemu QEMUFLAGS="$(QEMUFLAGS) -s -S"
 
-.PHONY: docker
-docker:
-	docker build -t tinyos .
-	echo "\nTo view graphical output, connect to http://localhost:8080/vnc.html\n"
-	docker run -it --rm -p 8080:8080 tinyos
+# Host-side unit tests (host target)
+.PHONY: test-host
+test-host:
+ifeq ($(strip $(HOST_TEST_PKGS)),)
+	@echo "HOST_TEST_PKGS is empty, nothing to test on the host"
+else
+	cargo test $(addprefix -p ,$(HOST_TEST_PKGS)) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
+endif
 
-.PHONY: run-hdd
-run-hdd: run-hdd-$(KARCH)
+.PHONY: test
+test: test-host test-qemu
+
+# ---------------------------------------------------------------------------
+# Housekeeping
+# ---------------------------------------------------------------------------
 
 .PHONY: clean
 clean:
-	$(MAKE) -C kernel clean
-	rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd
+	cargo clean --target-dir $(CARGO_TARGET_DIR)
+	rm -rf iso_root *.iso
 
 .PHONY: distclean
 distclean: clean
-	$(MAKE) -C kernel distclean
-	rm -rf limine ovmf
+	rm -rf $(LIMINE_DIR) $(OVMF_DIR)
 
-.PHONY: test
-test:
-	$(MAKE) run-$(KARCH) IMAGE_NAME=tiny_os-test-$(KARCH) CARGO_TARGET_DIR=$(CARGO_TARGET_DIR)/test CARGO_FLAGS="$(CARGO_FLAGS) --features test_run" QEMUFLAGS="$(QEMUFLAGS) -display none"
-
-.PHONY: check
-check:
-	$(MAKE) run-$(KARCH) CARGO_CMD=check QEMUFLAGS="$(QEMUFLAGS) -display none"
-
-# KERNEL_BIN needs to be kernel, as limine needs to know how its called in limine.conf
-
-.PHONY: run-x86_64
-run-x86_64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).iso
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
- 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
- 		-cdrom $(IMAGE_NAME).iso \
-		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
-		-serial stdio \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-x86_64
-run-hdd-x86_64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).hdd
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-.PHONY: run-aarch64
-run-aarch64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).iso
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu cortex-a72 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-aarch64
-run-hdd-aarch64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).hdd
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu cortex-a72 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-.PHONY: run-riscv64
-run-riscv64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).iso
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu rv64 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-riscv64
-run-hdd-riscv64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).hdd
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu rv64 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-.PHONY: run-loongarch64
-run-loongarch64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).iso
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu la464 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-loongarch64
-run-hdd-loongarch64: ovmf/ovmf-code-$(KARCH).fd ovmf/ovmf-vars-$(KARCH).fd $(IMAGE_NAME).hdd
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M virt \
-		-cpu la464 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(KARCH).fd \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-
-.PHONY: run-bios
-run-bios: $(IMAGE_NAME).iso
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M q35 \
-		-cdrom $(IMAGE_NAME).iso \
-		-boot d \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-bios
-run-hdd-bios: $(IMAGE_NAME).hdd
-	$(QEMU_WRAPPER) qemu-system-$(KARCH) \
-		-M q35 \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-# TODO update fallback version automatically (for now manully every now and then)
-# TODO migrate this to use https://github.com/rust-osdev/ovmf-prebuilt/
-ovmf/ovmf-code-$(KARCH).fd:
-	mkdir -p ovmf
-	curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-code-$(KARCH).fd
-	if [ $$(stat -c%s $@) -lt 1024 ]; then \
-		echo "Download of ovmf-code failed, trying to use knwon to be good falback version"; \
-		curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/download/nightly-20251203T012444Z/ovmf-code-$(KARCH).fd; \
-		if [ $$(stat -c%s $@) -lt 1024 ]; then \
-			echo "Download of fallback version failed. Aborting..."; \
-			rm -f $@; \
-			exit 1; \
-		fi; \
-	fi
-	case "$(KARCH)" in \
-		aarch64) dd if=/dev/zero of=$@ bs=1 count=0 seek=67108864 2>/dev/null;; \
-		loongarch64) dd if=/dev/zero of=$@ bs=1 count=0 seek=5242880 2>/dev/null;; \
-		riscv64) dd if=/dev/zero of=$@ bs=1 count=0 seek=33554432 2>/dev/null;; \
-	esac
-
-ovmf/ovmf-vars-$(KARCH).fd:
-	mkdir -p ovmf
-	curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-vars-$(KARCH).fd
-	if [ $$(stat -c%s $@) -lt 1024 ]; then \
-		echo "Download of ovmf-vars failed, trying to use knwon to be good falback version"; \
-		curl -fLo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/download/nightly-20251203T012444Z/ovmf-vars-$(KARCH).fd; \
-		if [ $$(stat -c%s $@) -lt 1024 ]; then \
-			echo "Download of fallback version failed. Aborting..."; \
-			rm -f $@; \
-			exit 1; \
-		fi; \
-	fi
-	case "$(KARCH)" in \
-		aarch64) dd if=/dev/zero of=$@ bs=1 count=0 seek=67108864 2>/dev/null;; \
-		loongarch64) dd if=/dev/zero of=$@ bs=1 count=0 seek=5242880 2>/dev/null;; \
-		riscv64) dd if=/dev/zero of=$@ bs=1 count=0 seek=33554432 2>/dev/null;; \
-	esac
-
-limine/limine:
-	rm -rf limine
-	git clone https://github.com/limine-bootloader/limine.git --branch=v9.x-binary --depth=1
-	$(MAKE) -C limine
-
-.PHONY: kernel
-kernel:
-	$(MAKE) -C kernel
-
-$(IMAGE_NAME).iso: limine/limine kernel
-	rm -rf iso_root
-	mkdir -p iso_root/boot
-	cp -v kernel/$(KERNEL_BIN) iso_root/boot/
-	mkdir -p iso_root/boot/limine
-	cp -v limine.conf iso_root/boot/limine/
-	mkdir -p iso_root/EFI/BOOT
-ifeq ($(KARCH),x86_64)
-	cp -v limine/limine-bios.sys limine/limine-bios-cd.bin limine/limine-uefi-cd.bin iso_root/boot/limine/
-	cp -v limine/BOOTX64.EFI iso_root/EFI/BOOT/
-	cp -v limine/BOOTIA32.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs -b boot/limine/limine-bios-cd.bin \
-		-no-emul-boot -boot-load-size 4 -boot-info-table \
-		--efi-boot boot/limine/limine-uefi-cd.bin \
-		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o $(IMAGE_NAME).iso
-	./limine/limine bios-install $(IMAGE_NAME).iso
-endif
-ifeq ($(KARCH),aarch64)
-	cp -v limine/limine-uefi-cd.bin iso_root/boot/limine/
-	cp -v limine/BOOTAA64.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs \
-		--efi-boot boot/limine/limine-uefi-cd.bin \
-		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o $(IMAGE_NAME).iso
-endif
-ifeq ($(KARCH),riscv64)
-	cp -v limine/limine-uefi-cd.bin iso_root/boot/limine/
-	cp -v limine/BOOTRISCV64.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs \
-		--efi-boot boot/limine/limine-uefi-cd.bin \
-		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o $(IMAGE_NAME).iso
-endif
-ifeq ($(KARCH),loongarch64)
-	cp -v limine/limine-uefi-cd.bin iso_root/boot/limine/
-	cp -v limine/BOOTLOONGARCH64.EFI iso_root/EFI/BOOT/
-	xorriso -as mkisofs \
-		--efi-boot boot/limine/limine-uefi-cd.bin \
-		-efi-boot-part --efi-boot-image --protective-msdos-label \
-		iso_root -o $(IMAGE_NAME).iso
-endif
-	rm -rf iso_root
-
-$(IMAGE_NAME).hdd: limine/limine kernel
-	rm -f $(IMAGE_NAME).hdd
-	dd if=/dev/zero bs=1M count=0 seek=64 of=$(IMAGE_NAME).hdd
-	sgdisk $(IMAGE_NAME).hdd -n 1:2048 -t 1:ef00
-ifeq ($(KARCH),x86_64)
-	./limine/limine bios-install $(IMAGE_NAME).hdd
-endif
-	mformat -i $(IMAGE_NAME).hdd@@1M
-	mmd -i $(IMAGE_NAME).hdd@@1M ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@1M kernel/bin-$(KARCH)/kernel ::/boot
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine.conf ::/boot/limine
-ifeq ($(KARCH),x86_64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/limine-bios.sys ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTX64.EFI ::/EFI/BOOT
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),aarch64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTAA64.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),riscv64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTRISCV64.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),loongarch64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTLOONGARCH64.EFI ::/EFI/BOOT
-endif
-
+# ---------------------------------------------------------------------------
+# Later
+#
+#   WASM guest apps:   cargo build -p <app> --target wasm32-wasip1 --release
+#   Host tools:        cargo build -p trace-conv           (no --target)
+#   Dynamic modules:   same workspace, different RUSTFLAGS (PIC etc.) and its
+#                      own --target-dir so the cache does not thrash
+# ---------------------------------------------------------------------------
