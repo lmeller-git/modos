@@ -27,12 +27,12 @@ make run
 ### Build & Run
 
 Commands:
-* make / make: all Compiles the kernel and builds the bootable tiny_os.iso image.
-* make kernel: Compiles only the kernel binary without regenerating the ISO.
-* make run: Builds the ISO and launches QEMU with UEFI (OVMF) support.
-* make debug: Boots in QEMU and pauses execution, listening for GDB on localhost:1234 (-s -S).
-* make check: Runs cargo check targeted at x86_64-unknown-none.
-* make clippy: Runs cargo clippy targeted at x86_64-unknown-none.
+* `make` / `make all`: Compiles the kernel and builds the bootable tiny_os.iso image.
+* `make kernel`: Compiles only the kernel binary without regenerating the ISO.
+* `make run`: Builds the ISO and launches QEMU with UEFI (OVMF) support.
+* `make debug`: Boots in QEMU and pauses execution, listening for GDB on localhost:1234 (-s -S).
+* `make check`: Runs cargo check targeted at x86_64-unknown-none.
+* `make clippy`: Runs cargo clippy targeted at x86_64-unknown-none.
 
 ---
 
