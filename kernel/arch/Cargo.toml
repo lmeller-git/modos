@@ -11,6 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

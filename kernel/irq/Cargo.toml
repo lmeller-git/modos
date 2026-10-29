@@ -12,7 +12,7 @@ categories.workspace = true
 
 [dependencies]
 bitflags = { workspace = true }
-arch = { workspace = true }
+arch = { path = "../arch" }
 
 [lints]
 workspace = true

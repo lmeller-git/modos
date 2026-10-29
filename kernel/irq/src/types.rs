@@ -1,5 +1,8 @@
+use arch::mm::VirtAddr;
+
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
+    #[repr(transparent)]
     pub struct PageFaultFlags: u32 {
         const PRESENT     = 1 << 0;
         const WRITE       = 1 << 1;
