@@ -18,7 +18,8 @@ unsafe extern "C" fn _start() -> ! {
     early_heap::init();
     let string = String::from_str("Hello world");
     serial_println!("We allocated this on the heap: {:?}", string);
-    // TODO irq then ...
+    arch_x86_64::late_init(&boot_info);
+    serial_println!("Completed late init");
     exit(0)
 }
 

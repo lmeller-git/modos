@@ -1,14 +1,24 @@
 #![no_std]
+#![feature(abi_x86_interrupt)]
 
 use core::fmt::Arguments;
 
 use boot::BootInfo;
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
-use x86_64::registers::control::{Cr4, Cr4Flags};
+use x86_64::{
+    instructions::interrupts,
+    registers::control::{Cr4, Cr4Flags},
+};
+
+use crate::pic::enable_timer;
 
 pub mod frame;
+mod gdt;
+mod idt;
+mod irq;
 pub mod page;
+mod pic;
 mod qemu;
 
 static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
@@ -25,6 +35,18 @@ pub fn early_init(boot_info: &BootInfo) {
     page::init_pagetable(boot_info.hhdm_offset.unwrap());
     frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
     init_xmm();
+}
+
+pub fn late_init(boot_info: &BootInfo) {
+    gdt::init();
+    idt::init_idt();
+    pic::init_apic(
+        boot_info.hhdm_offset.unwrap(),
+        boot_info.rsdp_addr.unwrap().as_ptr() as usize,
+    );
+
+    interrupts::enable();
+    enable_timer();
 }
 
 fn init_xmm() {
