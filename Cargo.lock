@@ -14,6 +14,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "arch"
+version = "0.1.0"
+
+[[package]]
 name = "arch-x86_64"
 version = "0.1.0"
 dependencies = [
@@ -91,6 +95,13 @@ name = "instrument"
 version = "0.1.0"
 
 [[package]]
+name = "irq"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.13.2",
+]
+
+[[package]]
 name = "kernel"
 version = "0.1.0"
 dependencies = [
@@ -131,6 +142,10 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "memory"
+version = "0.1.0"
+
+[[package]]
+name = "platform"
 version = "0.1.0"
 
 [[package]]
