@@ -3,12 +3,35 @@
 
 use core::fmt::Arguments;
 
+use arch_interfaces::{
+    cpu::CpuHandlingCapability,
+    init::InitCapability,
+    interrupt::InterruptHandlingCapability,
+    mm::{
+        FrameAllocatorCapability,
+        FrameDeAllocatorCapability,
+        MemMapperCapability,
+        MemUnmapperCapability,
+        PhysAddr,
+        PhysMemoryFrame,
+        TLBFlushCapability,
+    },
+};
 use boot::BootInfo;
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
     instructions::interrupts,
     registers::control::{Cr4, Cr4Flags},
+    structures::paging::{
+        FrameAllocator,
+        FrameDeallocator,
+        Mapper,
+        PageSize,
+        PhysFrame,
+        Size4KiB,
+        mapper::MapperFlush,
+    },
 };
 
 use crate::pic::enable_timer;
@@ -20,6 +43,99 @@ mod irq;
 pub mod page;
 mod pic;
 mod qemu;
+
+/// Capability provider for x86_64 targets
+pub struct X86_64;
+
+impl InitCapability for X86_64 {
+    fn early_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+        early_init(boot_info);
+        Ok(())
+    }
+
+    fn late_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+        late_init(boot_info);
+        Ok(())
+    }
+}
+
+impl CpuHandlingCapability for X86_64 {
+    fn core_init() {
+        todo!()
+    }
+}
+
+impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+    fn allocate() -> Option<PhysMemoryFrame<{ Size4KiB::SIZE as usize }>> {
+        frame::get_frame_alloc()
+            .lock()
+            .allocate_frame()
+            .map(|frame| {
+                PhysMemoryFrame::from_addr(PhysAddr::new(frame.start_address().as_u64() as usize))
+            })
+            .flatten()
+    }
+}
+
+impl FrameDeAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+    unsafe fn deallocate(frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>) -> Result<(), ()> {
+        unsafe {
+            frame::get_frame_alloc().lock().deallocate_frame(
+                PhysFrame::<Size4KiB>::from_start_address(x86_64::PhysAddr::new(
+                    frame.start().as_usize() as u64,
+                ))
+                .map_err(|_| {})?,
+            )
+        };
+        Ok(())
+    }
+}
+
+impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+    fn map_to(
+        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        flags: arch_interfaces::mm::PageFlags,
+        frame_allocator: &mut impl arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>,
+    ) -> Result<(), arch_interfaces::mm::PageTableError> {
+        todo!()
+    }
+}
+
+impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+    fn unmap(
+        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
+    ) -> Result<
+        (PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush),
+        arch_interfaces::mm::PageTableError,
+    > {
+        todo!()
+    }
+}
+
+impl TLBFlushCapability for X86_64 {
+    type Flush = MapperFlush<Size4KiB>;
+
+    fn flush(flush: Self::Flush) -> Result<(), ()> {
+        flush.flush();
+        Ok(())
+    }
+}
+
+impl InterruptHandlingCapability for X86_64 {
+    fn enable() {
+        todo!()
+    }
+
+    fn disable() {
+        todo!()
+    }
+
+    fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+        todo!()
+    }
+}
 
 static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
     let mut port = unsafe { SerialPort::new(0x3F8) };

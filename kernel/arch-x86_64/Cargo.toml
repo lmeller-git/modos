@@ -14,6 +14,7 @@ boot = { path = "../boot" }
 raw-cpuid = "11.5.0"
 acpi = { version = "5.2.0", features = ["alloc"] }
 conquer-once = { workspace = true }
+arch-interfaces = { path = "../arch-interfaces" }
 
 [lints]
 workspace = true

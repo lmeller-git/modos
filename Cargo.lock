@@ -17,7 +17,19 @@ dependencies = [
 name = "arch"
 version = "0.1.0"
 dependencies = [
+ "arch-interfaces",
+ "arch-x86_64",
  "bitflags 2.13.2",
+ "derive_more",
+ "thiserror",
+]
+
+[[package]]
+name = "arch-interfaces"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.13.2",
+ "boot",
  "derive_more",
  "thiserror",
 ]
@@ -27,6 +39,7 @@ name = "arch-x86_64"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "arch-interfaces",
  "boot",
  "conquer-once",
  "raw-cpuid 11.6.0",
@@ -143,7 +156,7 @@ dependencies = [
 name = "kernel"
 version = "0.1.0"
 dependencies = [
- "arch-x86_64",
+ "arch",
  "boot",
  "early_heap",
 ]

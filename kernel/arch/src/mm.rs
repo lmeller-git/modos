@@ -1,4 +1,4 @@
-use crate::mm::map::{FRAME_4KIB_SIZE, PhysMemoryFrame};
+use arch_interfaces::mm::{FRAME_4KIB_SIZE, PhysMemoryFrame};
 
 pub trait FrameAllocator<const SIZE: usize> {
     fn allocate(&mut self) -> Option<PhysMemoryFrame<SIZE>>;
@@ -46,12 +46,4 @@ impl<'a, const FRAME_SIZE: usize> FrameDeallocator<FRAME_SIZE> for DirectCollect
             return Ok(());
         }
     }
-}
-
-pub fn allocate_global<const SIZE: usize>() -> Option<PhysMemoryFrame<SIZE>> {
-    unimplemented!()
-}
-
-pub unsafe fn deallocate_global<const SIZE: usize>(frame: PhysMemoryFrame<SIZE>) -> Result<(), ()> {
-    unimplemented!()
 }
