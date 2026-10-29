@@ -12,6 +12,8 @@ use arch_interfaces::{
         FrameDeAllocatorCapability,
         MemMapperCapability,
         MemUnmapperCapability,
+        PageTableError,
+        PageTableErrorKind,
         PhysAddr,
         PhysMemoryFrame,
         TLBFlushCapability,
@@ -21,13 +23,15 @@ use boot::BootInfo;
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
-    instructions::interrupts,
+    instructions::interrupts::{self, without_interrupts},
     registers::control::{Cr4, Cr4Flags},
     structures::paging::{
         FrameAllocator,
         FrameDeallocator,
         Mapper,
+        Page,
         PageSize,
+        PageTableFlags,
         PhysFrame,
         Size4KiB,
         mapper::MapperFlush,
@@ -91,26 +95,68 @@ impl FrameDeAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     }
 }
 
+struct FrameAllocView<'a, T>(&'a mut T);
+
+unsafe impl<'a, T> FrameAllocator<Size4KiB> for FrameAllocView<'a, T>
+where
+    T: arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>,
+{
+    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
+        self.0.allocate().map(|frame| {
+            PhysFrame::from_start_address(x86_64::PhysAddr::new(frame.start().as_usize() as u64))
+                .unwrap()
+        })
+    }
+}
+
 impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
-    fn map_to(
+    unsafe fn map_to(
         page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
         frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
         flags: arch_interfaces::mm::PageFlags,
         frame_allocator: &mut impl arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<(), arch_interfaces::mm::PageTableError> {
-        todo!()
+    ) -> Result<Self::Flush, PageTableError> {
+        unsafe {
+            page::get_pagetable()
+                .lock()
+                .map_to(
+                    Page::from_start_address(x86_64::VirtAddr::new(page.start().as_usize() as u64))
+                        .unwrap(),
+                    PhysFrame::<Size4KiB>::from_start_address(x86_64::PhysAddr::new(
+                        frame.start().as_usize() as u64,
+                    ))
+                    .unwrap(),
+                    PageTableFlags::from_bits(flags.bits()).unwrap(),
+                    &mut FrameAllocView(frame_allocator),
+                )
+                .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
+        }
     }
 }
 
 impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     fn unmap(
         page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<
-        (PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush),
-        arch_interfaces::mm::PageTableError,
-    > {
-        todo!()
+        _frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
+    ) -> Result<(PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush), PageTableError> {
+        page::get_pagetable()
+            .lock()
+            .unmap(
+                Page::<Size4KiB>::from_start_address(x86_64::VirtAddr::new(
+                    page.start().as_usize() as u64,
+                ))
+                .unwrap(),
+            )
+            .map(|(frame, flush)| {
+                (
+                    PhysMemoryFrame::from_addr(PhysAddr::new(
+                        frame.start_address().as_u64() as usize
+                    ))
+                    .unwrap(),
+                    flush,
+                )
+            })
+            .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
     }
 }
 
@@ -125,15 +171,15 @@ impl TLBFlushCapability for X86_64 {
 
 impl InterruptHandlingCapability for X86_64 {
     fn enable() {
-        todo!()
+        interrupts::enable();
     }
 
     fn disable() {
-        todo!()
+        interrupts::disable();
     }
 
     fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
-        todo!()
+        without_interrupts(f)
     }
 }
 

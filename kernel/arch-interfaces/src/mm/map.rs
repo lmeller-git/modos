@@ -127,15 +127,20 @@ pub enum PageTableError {
 }
 
 #[derive(Error, Debug)]
-pub enum PageTableErrorKind {}
+pub enum PageTableErrorKind {
+    #[error("No error")]
+    None,
+}
 
-pub trait MemMapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE> {
-    fn map_to(
+pub trait MemMapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
+    TLBFlushCapability
+{
+    unsafe fn map_to(
         page: VirtMemoryFrame<FRAME_SIZE>,
         frame: PhysMemoryFrame<FRAME_SIZE>,
         flags: PageFlags,
         frame_allocator: &mut impl FrameAllocator<FRAME_SIZE>,
-    ) -> Result<(), PageTableError>;
+    ) -> Result<Self::Flush, PageTableError>;
 }
 
 pub trait MemUnmapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
