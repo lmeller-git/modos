@@ -13,6 +13,7 @@ description.workspace = true
 [dependencies]
 boot = { path = "../boot" }
 arch-x86_64 = { path = "../arch-x86_64" }
+early_heap = { path = "../early_heap" }
 
 [lints]
 workspace = true

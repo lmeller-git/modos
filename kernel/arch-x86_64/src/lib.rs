@@ -22,6 +22,7 @@ pub fn exit(code: usize) -> ! {
 }
 
 pub fn early_init(boot_info: &BootInfo) {
+    page::init_pagetable(boot_info.hhdm_offset.unwrap());
     frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
     init_xmm();
 }
