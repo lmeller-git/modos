@@ -2,25 +2,17 @@
 
 pub use platform_interfaces as interface;
 use platform_interfaces::{power::ShutdownCapability, serial::SerialWriterCapability};
-#[cfg(feature = "platform-pc-qemu")]
-use platform_pc_qemu::PcQemu;
+#[cfg(feature = "platform-pc-x86_64")]
+use platform_pc_x86_64::PcQemu;
 
-#[cfg(feature = "platform-pc-qemu")]
+#[cfg(feature = "platform-pc-x86_64")]
 pub type TargetPlatform = PcQemu;
-#[cfg(not(feature = "platform-pc-qemu"))]
+#[cfg(not(feature = "platform-pc-x86_64"))]
 pub struct TargetPlatform;
 
-#[expect(dead_code)]
-fn t_supports<T>()
-where
-    T: ShutdownCapability + SerialWriterCapability,
-{
-}
+pub trait SupportedPlatform: ShutdownCapability + SerialWriterCapability {}
 
-#[expect(dead_code)]
-fn target_paltform_supported() {
-    t_supports::<TargetPlatform>();
-}
+impl SupportedPlatform for TargetPlatform {}
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

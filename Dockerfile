@@ -7,7 +7,6 @@ RUN apt-get update && apt-get install -y \
     curl \
     qemu-system-x86 \
     xorriso \
-
     novnc \
     websockify \
     && rm -rf /var/lib/apt/lists/*

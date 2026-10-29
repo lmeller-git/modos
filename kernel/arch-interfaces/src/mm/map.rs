@@ -7,6 +7,8 @@ use crate::mm::{
     allocr::FrameAllocator,
 };
 
+// PageFlags adapted from https://github.com/rust-osdev/x86_64/blob/master/src/addr.rs. Licensed under MIT https://github.com/rust-osdev/x86_64/blob/master/LICENSE-MIT.
+
 bitflags::bitflags! {
     #[derive(
         Clone,

@@ -1,5 +1,5 @@
 use conquer_once::spin::OnceCell;
-use x86_64::{VirtAddr, structures::idt::InterruptDescriptorTable};
+use x86_64::structures::idt::InterruptDescriptorTable;
 
 use crate::{
     gdt,
@@ -23,7 +23,7 @@ pub(crate) fn init_idt() {
 
     unsafe {
         idt.double_fault
-            .set_handler_addr(VirtAddr::new(double_fault_handler as usize as u64))
+            .set_handler_fn(double_fault_handler)
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
     }
     idt.page_fault.set_handler_fn(page_fault_handler);
@@ -38,8 +38,7 @@ pub(crate) fn init_idt() {
 }
 
 #[repr(u8)]
-pub enum InterruptIndex {
+pub(crate) enum InterruptIndex {
     Timer = 0x20,
     Keyboard = 0x21,
-    Syscall = 0x80,
 }

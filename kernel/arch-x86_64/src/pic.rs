@@ -178,7 +178,7 @@ impl acpi::AcpiHandler for Foo {
                     match mapper.map_to(page, frame, flags, &mut *frame_allocator) {
                         Ok(f) => f.flush(),
                         Err(mapper::MapToError::PageAlreadyMapped(_)) => {}
-                        Err(e) => panic!("{:#?}", e),
+                        Err(e) => panic!("{e:#?}"),
                     }
                 }
             }
@@ -195,7 +195,6 @@ impl acpi::AcpiHandler for Foo {
     }
 
     fn unmap_physical_region<T>(_region: &acpi::PhysicalMapping<Self, T>) {
-        return;
         // let start = region.physical_start();
         // let size = region.mapped_length();
         // for phys in (start..start + size).step_by(Size4KiB::SIZE as usize) {
@@ -426,7 +425,7 @@ pub(super) fn init_apic(hhdm_offset: usize, rsdp: usize) {
                     local_apic_addr as usize,
                     &mut *page_table,
                     &mut *frame_allocator,
-                )
+                );
             };
             serial_println!("hey");
         }

@@ -74,10 +74,9 @@ impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
         frame::get_frame_alloc()
             .lock()
             .allocate_frame()
-            .map(|frame| {
+            .and_then(|frame| {
                 PhysMemoryFrame::from_addr(PhysAddr::new(frame.start_address().as_u64() as usize))
             })
-            .flatten()
     }
 }
 
@@ -89,7 +88,7 @@ impl FrameDeAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
                     frame.start().as_usize() as u64,
                 ))
                 .map_err(|_| {})?,
-            )
+            );
         };
         Ok(())
     }
@@ -225,7 +224,7 @@ pub fn _serial_print(args: Arguments<'_>) {
     SERIAL
         .lock()
         .write_fmt(args)
-        .expect("Printing to serial failed")
+        .expect("Printing to serial failed");
 }
 
 #[macro_export]

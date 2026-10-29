@@ -21,23 +21,18 @@ pub type TargetArch = arch_x86_64::X86_64;
 #[cfg(not(target_arch = "x86_64"))]
 pub struct TargetArch;
 
-#[expect(dead_code)]
-fn t_supports<T>()
-where
-    T: CpuHandlingCapability
-        + InterruptHandlingCapability
-        + FrameAllocatorCapability
-        + FrameDeAllocatorCapability
-        + MemMapperCapability
-        + MemUnmapperCapability
-        + InitCapability,
+pub trait SupportedArch:
+    CpuHandlingCapability
+    + InterruptHandlingCapability
+    + FrameAllocatorCapability
+    + FrameDeAllocatorCapability
+    + MemMapperCapability
+    + MemUnmapperCapability
+    + InitCapability
 {
 }
 
-#[expect(dead_code)]
-fn target_arch_supported() {
-    t_supports::<TargetArch>();
-}
+impl SupportedArch for TargetArch {}
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

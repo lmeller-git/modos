@@ -11,6 +11,7 @@ use uart_16550::SerialPort;
 
 pub struct PcQemu;
 
+#[cfg(feature = "qemu-platform")]
 impl ShutdownCapability for PcQemu {
     fn shutdown(code: ExitCode) -> ! {
         unsafe {

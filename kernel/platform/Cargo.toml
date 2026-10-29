@@ -11,12 +11,12 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["platform-pc-qemu"]
-platform-pc-qemu = ["dep:platform-pc-qemu"]
+default = ["platform-pc-x86_64"]
+platform-pc-x86_64 = ["dep:platform-pc-x86_64"]
 
 [dependencies]
 platform-interfaces = { path = "../platform-interfaces" }
-platform-pc-qemu = { path = "../platform-pc-qemu", optional = true }
+platform-pc-x86_64 = { path = "../platform-pc-x86_64", optional = true }
 
 [lints]
 workspace = true

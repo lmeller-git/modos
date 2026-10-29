@@ -32,7 +32,7 @@ pub mod linked_list {
             }
         }
 
-        pub fn init(&self, heap_bottom: *mut u8, heap_size: usize) {
+        pub unsafe fn init(&self, heap_bottom: *mut u8, heap_size: usize) {
             unsafe {
                 self.inner.lock().init(heap_bottom, heap_size);
             }
@@ -40,6 +40,12 @@ pub mod linked_list {
 
         pub fn lock(&self) -> MutexGuard<'_, Heap> {
             self.inner.lock()
+        }
+    }
+
+    impl Default for SafeHeap {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -82,7 +88,7 @@ pub fn init() {
                 .flush();
         };
     }
-    GLOBAL_ALLOCATOR.init(HEAP_START as *mut u8, HEAP_SIZE);
+    unsafe { GLOBAL_ALLOCATOR.init(HEAP_START as *mut u8, HEAP_SIZE) };
 }
 
 pub fn map_heap(tbl: &mut OffsetPageTable<'_>) {
