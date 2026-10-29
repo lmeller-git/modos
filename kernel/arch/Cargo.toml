@@ -1,0 +1,23 @@
+[package]
+name = "arch"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+derive_more = { workspace = true }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+arch-interfaces = { path = "../arch-interfaces" }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+arch-x86_64 = { path = "../arch-x86_64" }
+
+[lints]
+workspace = true

@@ -6,26 +6,54 @@ extern crate alloc;
 use alloc::string::String;
 #[cfg(not(test))]
 use core::panic::PanicInfo;
-use core::str::FromStr;
+use core::{fmt::Arguments, str::FromStr};
 
-use arch_x86_64::{exit, serial_println};
+use arch::interface::init::InitCapability;
+use platform::{
+    TargetPlatform,
+    interface::{
+        power::{ExitCode, ShutdownCapability},
+        serial::SerialWriterCapability,
+    },
+};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
     let boot_info = boot::build_bootinfo();
     serial_println!("Hello there!");
-    arch_x86_64::early_init(&boot_info);
+    arch::TargetArch::early_init(&boot_info).unwrap();
     early_heap::init();
     let string = String::from_str("Hello world");
     serial_println!("We allocated this on the heap: {:?}", string);
-    arch_x86_64::late_init(&boot_info);
+    arch::TargetArch::late_init(&boot_info).unwrap();
     serial_println!("Completed late init");
-    exit(0)
+    TargetPlatform::shutdown(ExitCode::Success)
 }
 
 #[cfg(not(test))]
 #[panic_handler]
 fn kernel_panic(info: &PanicInfo<'_>) -> ! {
     serial_println!("Panic: {:?}", info);
-    exit(1)
+    TargetPlatform::shutdown(ExitCode::Failure)
+}
+
+#[macro_export]
+macro_rules! serial_println {
+    () => {
+        $crate::serial_print!("\n")
+    };
+    ($($arg:tt)*) => {
+        $crate::serial_print!("{}\n", format_args!($($arg)*))
+    };
+}
+#[macro_export]
+macro_rules! serial_print {
+    () => {};
+    ($($arg:tt)*) => {
+        $crate::_serial_print(format_args!("\x1b[34m[KINFO]\x1b[0m {}", format_args!($($arg)*)))
+    };
+}
+
+fn _serial_print(args: Arguments<'_>) {
+    TargetPlatform::write_fmt(args).unwrap();
 }

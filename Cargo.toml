@@ -21,7 +21,10 @@ categories = []
 [workspace.dependencies]
 x86_64 = "0.15.2"
 conquer-once = { version = "0.4.0", default-features = false }
+bitflags = "2.9.2"
 spin = "0.10.0"
+derive_more = { version = "2.1.1", default-features = false, features = ["full"] }
+thiserror = { version = "2.0.21", default-features = false }
 
 [profile.dev]
 codegen-units = 1

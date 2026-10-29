@@ -1,0 +1,20 @@
+[package]
+name = "arch-interfaces"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+derive_more = { workspace = true }
+bitflags = { workspace = true }
+thiserror = { workspace = true }
+boot = { path = "../boot" }
+
+[lints]
+workspace = true
