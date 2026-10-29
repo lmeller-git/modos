@@ -10,7 +10,13 @@ documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["platform-pc-qemu"]
+platform-pc-qemu = ["dep:platform-pc-qemu"]
+
 [dependencies]
+platform-interfaces = { path = "../platform-interfaces" }
+platform-pc-qemu = { path = "../platform-pc-qemu", optional = true }
 
 [lints]
 workspace = true

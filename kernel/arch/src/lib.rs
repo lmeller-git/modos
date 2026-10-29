@@ -21,6 +21,7 @@ pub type TargetArch = arch_x86_64::X86_64;
 #[cfg(not(target_arch = "x86_64"))]
 pub struct TargetArch;
 
+#[expect(dead_code)]
 fn t_supports<T>()
 where
     T: CpuHandlingCapability
@@ -33,6 +34,7 @@ where
 {
 }
 
+#[expect(dead_code)]
 fn target_arch_supported() {
     t_supports::<TargetArch>();
 }

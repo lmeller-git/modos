@@ -1,4 +1,4 @@
-use arch::mm::VirtAddr;
+use arch::interface::mm::VirtAddr;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
