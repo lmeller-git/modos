@@ -38,7 +38,7 @@ use x86_64::{
     },
 };
 
-use crate::pic::enable_timer;
+use crate::{frame::X86FrameAllocView, pic::enable_timer};
 
 pub mod frame;
 mod gdt;
@@ -64,9 +64,7 @@ impl InitCapability for X86_64 {
 }
 
 impl CpuHandlingCapability for X86_64 {
-    fn core_init(_: &LateBootInfo) {
-        todo!()
-    }
+    fn core_init(_: &LateBootInfo) {}
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -129,6 +127,21 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
                     &mut FrameAllocView(frame_allocator),
                 )
                 .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
+        }
+    }
+
+    unsafe fn map_to_global(
+        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        flags: arch_interfaces::mm::PageFlags,
+    ) -> Result<Self::Flush, PageTableError> {
+        unsafe {
+            Self::map_to(
+                page,
+                frame,
+                flags,
+                &mut X86FrameAllocView(&mut *frame::get_frame_alloc().lock()),
+            )
         }
     }
 }

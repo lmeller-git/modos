@@ -24,7 +24,7 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::late_init(&boot_info).unwrap();
     serial_println!("Completed late init");
     let late_info = boot_info.into_late();
-    arch::TargetArch::core_init();
+    arch::TargetArch::core_init(&late_info);
 
     TargetPlatform::shutdown(ExitCode::Success)
 }

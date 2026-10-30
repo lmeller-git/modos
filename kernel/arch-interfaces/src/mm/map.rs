@@ -102,6 +102,7 @@ impl<const SIZE: usize> PhysMemoryFrame<SIZE> {
     }
 }
 
+#[derive(Clone, Debug, Copy)]
 pub struct VirtMemoryFrame<const SIZE: usize = FRAME_4KIB_SIZE> {
     start: VirtAddr,
 }
@@ -114,6 +115,79 @@ impl<const SIZE: usize> VirtMemoryFrame<SIZE> {
 
     pub fn start(&self) -> VirtAddr {
         self.start
+    }
+
+    pub fn containing_address(mut addr: VirtAddr) -> Self {
+        addr.align_down(SIZE);
+        Self { start: addr }
+    }
+
+    pub fn range(
+        start: VirtMemoryFrame<SIZE>,
+        end: VirtMemoryFrame<SIZE>,
+    ) -> VirtMemoryFrameRange<SIZE> {
+        VirtMemoryFrameRange { start, end }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VirtMemoryFrameRange<const SIZE: usize = FRAME_4KIB_SIZE> {
+    start: VirtMemoryFrame<SIZE>,
+    end: VirtMemoryFrame<SIZE>,
+}
+
+impl<const SIZE: usize> VirtMemoryFrameRange<SIZE> {
+    pub fn is_empty(&self) -> bool {
+        self.end.start <= self.start.start
+    }
+
+    pub fn len(&self) -> usize {
+        if !self.is_empty() {
+            self.end.start.as_usize() - self.start.start.as_usize()
+        } else {
+            0
+        }
+    }
+}
+
+impl<const SIZE: usize> IntoIterator for VirtMemoryFrameRange<SIZE> {
+    type IntoIter = VirtMemoryFrameRangeIter<SIZE>;
+    type Item = VirtMemoryFrame<SIZE>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        VirtMemoryFrameRangeIter(self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VirtMemoryFrameRangeIter<const SIZE: usize = FRAME_4KIB_SIZE>(
+    VirtMemoryFrameRange<SIZE>,
+);
+
+impl<const SIZE: usize> Iterator for VirtMemoryFrameRangeIter<SIZE> {
+    type Item = VirtMemoryFrame<SIZE>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.start.start < self.0.end.start {
+            let page = self.0.start;
+            self.0.start.start = self.0.start.start + SIZE;
+            Some(page)
+        } else {
+            None
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        for _ in 1..n {
+            self.next()?;
+        }
+        self.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.0.len();
+        (len, Some(len))
     }
 }
 
@@ -142,6 +216,12 @@ pub trait MemMapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
         frame: PhysMemoryFrame<FRAME_SIZE>,
         flags: PageFlags,
         frame_allocator: &mut impl FrameAllocator<FRAME_SIZE>,
+    ) -> Result<Self::Flush, PageTableError>;
+
+    unsafe fn map_to_global(
+        page: VirtMemoryFrame<FRAME_SIZE>,
+        frame: PhysMemoryFrame<FRAME_SIZE>,
+        flags: PageFlags,
     ) -> Result<Self::Flush, PageTableError>;
 }
 

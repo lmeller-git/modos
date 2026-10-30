@@ -1,5 +1,6 @@
 use core::ptr::null_mut;
 
+use arch_interfaces::mm::PhysMemoryFrame;
 use boot::memmap::{Entry, MEMMAP_BOOTLOADER_RECLAIMABLE, MEMMAP_USABLE};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
@@ -29,7 +30,6 @@ struct Region {
 
 pub(crate) struct LinkedListFrameAllocator {
     head: *mut u64,
-    current_batch_end: usize,
     regions: &'static mut [Region], // we allocate this in an empty frame at init
     hhdm_offset: usize,
     count: usize,
@@ -80,7 +80,6 @@ impl LinkedListFrameAllocator {
 
         let mut alloc = Self {
             head: null_mut(),
-            current_batch_end: 0,
             regions,
             hhdm_offset,
             count,
@@ -108,7 +107,7 @@ impl LinkedListFrameAllocator {
     }
 
     fn add_batch(&mut self) -> bool {
-        const FRAMES_PER_BATCH: usize = 10000;
+        const FRAMES_PER_BATCH: usize = 1000;
 
         // all regions have multiple of Size4Kib::SIZE bytes
         let Some(region) = self.regions[..self.count].iter_mut().find(|r| r.len > 0) else {
@@ -163,6 +162,41 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
             core::ptr::write_bytes(next_head_ptr, 0, Size4KiB::SIZE as usize);
         }
         Some(frame)
+    }
+}
+
+pub struct X86FrameAllocView<'a, A>(pub(crate) &'a mut A);
+
+impl<'a, A> arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>
+    for X86FrameAllocView<'a, A>
+where
+    A: FrameAllocator<Size4KiB>,
+{
+    fn allocate(&mut self) -> Option<PhysMemoryFrame<{ Size4KiB::SIZE as usize }>> {
+        self.0.allocate_frame().and_then(|frame| {
+            PhysMemoryFrame::from_addr(arch_interfaces::mm::PhysAddr::new(
+                frame.start_address().as_u64() as usize,
+            ))
+        })
+    }
+}
+
+impl<'a, A> arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>
+    for X86FrameAllocView<'a, A>
+where
+    A: FrameDeallocator<Size4KiB>,
+{
+    unsafe fn deallocate(
+        &mut self,
+        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+    ) -> Result<(), ()> {
+        unsafe {
+            self.0.deallocate_frame(
+                PhysFrame::from_start_address(PhysAddr::new(frame.start().as_usize() as u64))
+                    .map_err(|_| {})?,
+            );
+        }
+        Ok(())
     }
 }
 

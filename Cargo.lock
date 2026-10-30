@@ -130,10 +130,9 @@ dependencies = [
 name = "early_heap"
 version = "0.1.0"
 dependencies = [
- "arch-x86_64",
+ "arch",
  "linked_list_allocator",
  "spin",
- "x86_64",
 ]
 
 [[package]]
