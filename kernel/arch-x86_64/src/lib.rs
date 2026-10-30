@@ -19,7 +19,7 @@ use arch_interfaces::{
         TLBFlushCapability,
     },
 };
-use boot::BootInfo;
+use boot::{EarlyBootInfo, LateBootInfo};
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
@@ -52,19 +52,19 @@ mod qemu;
 pub struct X86_64;
 
 impl InitCapability for X86_64 {
-    fn early_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+    fn early_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
         early_init(boot_info);
         Ok(())
     }
 
-    fn late_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+    fn late_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
         late_init(boot_info);
         Ok(())
     }
 }
 
 impl CpuHandlingCapability for X86_64 {
-    fn core_init() {
+    fn core_init(_: &LateBootInfo) {
         todo!()
     }
 }
@@ -192,13 +192,13 @@ pub fn exit(code: usize) -> ! {
     qemu::exit_qemu(qemu::QemuExitCode::from_usize(code));
 }
 
-pub fn early_init(boot_info: &BootInfo) {
+pub fn early_init(boot_info: &EarlyBootInfo<'_>) {
     page::init_pagetable(boot_info.hhdm_offset.unwrap());
     frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
     init_xmm();
 }
 
-pub fn late_init(boot_info: &BootInfo) {
+pub fn late_init(boot_info: &EarlyBootInfo<'_>) {
     gdt::init();
     idt::init_idt();
     pic::init_apic(

@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::string::String;
 use core::str::FromStr;
 
-use arch::interface::init::InitCapability;
+use arch::interface::{cpu::CpuHandlingCapability, init::InitCapability};
 use kernel::serial_println;
 use platform::{
     TargetPlatform,
@@ -23,5 +23,8 @@ unsafe extern "C" fn _start() -> ! {
     serial_println!("We allocated this on the heap: {:?}", string);
     arch::TargetArch::late_init(&boot_info).unwrap();
     serial_println!("Completed late init");
+    let late_info = boot_info.into_late();
+    arch::TargetArch::core_init();
+
     TargetPlatform::shutdown(ExitCode::Success)
 }
