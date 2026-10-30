@@ -1,3 +1,4 @@
+use boot::LateBootInfo;
 use derive_more::{Binary, Display, LowerHex, Octal, UpperHex};
 
 #[derive(
@@ -25,7 +26,7 @@ impl CpuId {
 }
 
 pub trait CpuHandlingCapability {
-    fn core_init();
+    fn core_init(boot_info: &LateBootInfo);
     fn cpu_count() -> u32 {
         1
     }

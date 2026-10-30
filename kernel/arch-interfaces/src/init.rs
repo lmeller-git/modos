@@ -1,6 +1,6 @@
 use core::fmt::Display;
 
-use boot::BootInfo;
+use boot::EarlyBootInfo;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,7 +23,7 @@ pub enum InitErrorKind {
 }
 
 pub trait InitCapability {
-    fn early_init(boot_info: &BootInfo) -> Result<(), InitError>;
+    fn early_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), InitError>;
 
-    fn late_init(boot_info: &BootInfo) -> Result<(), InitError>;
+    fn late_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), InitError>;
 }

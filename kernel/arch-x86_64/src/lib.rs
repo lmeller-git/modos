@@ -19,7 +19,7 @@ use arch_interfaces::{
         TLBFlushCapability,
     },
 };
-use boot::BootInfo;
+use boot::{EarlyBootInfo, LateBootInfo};
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
@@ -38,7 +38,7 @@ use x86_64::{
     },
 };
 
-use crate::pic::enable_timer;
+use crate::{frame::X86FrameAllocView, pic::enable_timer};
 
 pub mod frame;
 mod gdt;
@@ -52,21 +52,19 @@ mod qemu;
 pub struct X86_64;
 
 impl InitCapability for X86_64 {
-    fn early_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+    fn early_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
         early_init(boot_info);
         Ok(())
     }
 
-    fn late_init(boot_info: &BootInfo) -> Result<(), arch_interfaces::init::InitError> {
+    fn late_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
         late_init(boot_info);
         Ok(())
     }
 }
 
 impl CpuHandlingCapability for X86_64 {
-    fn core_init() {
-        todo!()
-    }
+    fn core_init(_: &LateBootInfo) {}
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -131,6 +129,21 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
                 .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
         }
     }
+
+    unsafe fn map_to_global(
+        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        flags: arch_interfaces::mm::PageFlags,
+    ) -> Result<Self::Flush, PageTableError> {
+        unsafe {
+            Self::map_to(
+                page,
+                frame,
+                flags,
+                &mut X86FrameAllocView(&mut *frame::get_frame_alloc().lock()),
+            )
+        }
+    }
 }
 
 impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -192,13 +205,13 @@ pub fn exit(code: usize) -> ! {
     qemu::exit_qemu(qemu::QemuExitCode::from_usize(code));
 }
 
-pub fn early_init(boot_info: &BootInfo) {
+pub fn early_init(boot_info: &EarlyBootInfo<'_>) {
     page::init_pagetable(boot_info.hhdm_offset.unwrap());
     frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
     init_xmm();
 }
 
-pub fn late_init(boot_info: &BootInfo) {
+pub fn late_init(boot_info: &EarlyBootInfo<'_>) {
     gdt::init();
     idt::init_idt();
     pic::init_apic(

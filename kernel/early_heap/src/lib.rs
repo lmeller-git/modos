@@ -1,8 +1,14 @@
 #![no_std]
 
-use x86_64::{
-    VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags, Size4KiB},
+use arch::{
+    TargetArch,
+    interface::mm::{
+        FrameAllocatorCapability,
+        MemMapperCapability,
+        PageFlags,
+        VirtAddr,
+        VirtMemoryFrame,
+    },
 };
 
 #[global_allocator]
@@ -70,51 +76,21 @@ pub const HEAP_SIZE: usize = 10000 * 1024; // 10 MiB
 
 pub fn init() {
     let page_range = {
-        let heap_start = VirtAddr::new(HEAP_START as u64);
-        let heap_end = heap_start + HEAP_SIZE as u64;
-        let heap_start_page = Page::containing_address(heap_start);
-        let heap_end_page = Page::containing_address(heap_end);
-        Page::range(heap_start_page, heap_end_page)
-    };
-    for page in page_range {
-        let mut allocator = arch_x86_64::frame::get_frame_alloc().lock();
-        let frame = allocator.allocate_frame().unwrap();
-        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::GLOBAL;
-        unsafe {
-            arch_x86_64::page::get_pagetable()
-                .lock()
-                .map_to(page, frame, flags, &mut *allocator)
-                .unwrap()
-                .flush();
-        };
-    }
-    unsafe { GLOBAL_ALLOCATOR.init(HEAP_START as *mut u8, HEAP_SIZE) };
-}
-
-pub fn map_heap(tbl: &mut OffsetPageTable<'_>) {
-    let page_range = {
-        let heap_start = VirtAddr::new(HEAP_START as u64);
-        let heap_end = heap_start + HEAP_SIZE as u64 - 1u64;
-        let heap_start_page: Page<Size4KiB> = Page::containing_address(heap_start);
-        let heap_end_page: Page<Size4KiB> = Page::containing_address(heap_end);
-        Page::range_inclusive(heap_start_page, heap_end_page)
+        let heap_start = VirtAddr::new(HEAP_START);
+        let heap_end = heap_start + HEAP_SIZE;
+        let heap_start_page = VirtMemoryFrame::containing_address(heap_start);
+        let heap_end_page = VirtMemoryFrame::containing_address(heap_end);
+        VirtMemoryFrame::range(heap_start_page, heap_end_page)
     };
 
-    let mapper = arch_x86_64::page::get_pagetable().lock();
-    let mut allocator = arch_x86_64::frame::get_frame_alloc().lock();
     for page in page_range {
-        let frame = mapper.translate_page(page).unwrap();
-        unsafe {
-            tbl.map_to(
-                page,
-                frame,
-                PageTableFlags::WRITABLE | PageTableFlags::PRESENT | PageTableFlags::GLOBAL,
-                &mut *allocator,
-            )
+        let frame = TargetArch::allocate().unwrap();
+        let flags = PageFlags::PRESENT | PageFlags::WRITABLE | PageFlags::GLOBAL;
+        unsafe { TargetArch::map_to_global(page, frame, flags) }
             .unwrap()
             .flush();
-        }
     }
+    unsafe { GLOBAL_ALLOCATOR.init(HEAP_START as *mut u8, HEAP_SIZE) };
 }
 
 pub fn add(left: u64, right: u64) -> u64 {
