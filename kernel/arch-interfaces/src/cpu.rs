@@ -25,8 +25,7 @@ impl CpuId {
     }
 }
 
-pub trait CpuHandlingCapability {
-    fn core_init(boot_info: &LateBootInfo);
+pub trait CpuDataCapability {
     fn cpu_count() -> u32 {
         1
     }
@@ -46,4 +45,9 @@ pub trait CpuHandlingCapability {
     fn cpus() -> impl Iterator<Item = CpuId> {
         core::iter::once(Self::current_cpu())
     }
+}
+
+pub trait SmpCapability {
+    fn ap_init(boot_info: &LateBootInfo) {}
+    fn ap_release() {}
 }

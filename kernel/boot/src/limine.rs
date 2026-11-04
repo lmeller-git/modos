@@ -117,7 +117,7 @@ pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInf
                 is_bsp: core_data.lapic_id == response.bsp_lapic_id,
             })
             .collect(),
-        start_cpu: start_cpu,
+        start_cpu,
     });
 
     let bootloader_info = early_boot

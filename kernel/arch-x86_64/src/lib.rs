@@ -4,7 +4,7 @@
 use core::fmt::Arguments;
 
 use arch_interfaces::{
-    cpu::CpuHandlingCapability,
+    cpu::{CpuDataCapability, SmpCapability},
     init::InitCapability,
     interrupt::InterruptHandlingCapability,
     mm::{
@@ -63,8 +63,16 @@ impl InitCapability for X86_64 {
     }
 }
 
-impl CpuHandlingCapability for X86_64 {
-    fn core_init(_: &LateBootInfo) {}
+impl CpuDataCapability for X86_64 {}
+
+impl SmpCapability for X86_64 {
+    fn ap_init(boot_info: &LateBootInfo) {
+        todo!()
+    }
+
+    fn ap_release() {
+        todo!()
+    }
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {

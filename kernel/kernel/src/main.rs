@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::string::String;
 use core::str::FromStr;
 
-use arch::interface::{cpu::CpuHandlingCapability, init::InitCapability};
+use arch::interface::{cpu::CpuDataCapability, init::InitCapability};
 use kernel::serial_println;
 use platform::{
     TargetPlatform,
