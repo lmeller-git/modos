@@ -3,8 +3,14 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, sync::Arc};
-use core::{fmt::Arguments, mem::ManuallyDrop, ptr::NonNull, sync::atomic::AtomicU8};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use core::{
+    fmt::Arguments,
+    hint::spin_loop,
+    mem::ManuallyDrop,
+    ptr::NonNull,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 use arch_interfaces::{
     cpu::{CpuDataCapability, SmpCapability},
@@ -26,10 +32,16 @@ use boot::{EarlyBootInfo, LateBootInfo, mp::BootCpu};
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
-    instructions::interrupts::{self, without_interrupts},
-    registers::control::{Cr4, Cr4Flags},
+    instructions::{
+        interrupts::{self, without_interrupts},
+        tables::load_tss,
+    },
+    registers::{
+        control::{Cr3, Cr3Flags, Cr4, Cr4Flags},
+        segmentation::{CS, SS, Segment},
+    },
     structures::{
-        gdt::GlobalDescriptorTable,
+        gdt::{Descriptor, GlobalDescriptorTable},
         paging::{
             FrameAllocator,
             FrameDeallocator,
@@ -85,22 +97,51 @@ enum CPUCoreState {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
 struct CPUStartupData {
-    cpu: &'static BootCpu,
+    cpu: BootCpu,
     stack: ManuallyDrop<NonNull<u8>>,
     gdt: GlobalDescriptorTable,
     selectors: Selectors,
-    tss: &'static mut TaskStateSegment,
-    ready: Arc<AtomicU8>,
-    entry: fn(&BootCpu) -> !,
+    tss: &'static TaskStateSegment,
+    entry: fn(BootCpu) -> !,
+    cr3: (PhysFrame<Size4KiB>, Cr3Flags),
+    state: Arc<AtomicU8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct APBringupSync {
+    cores: Vec<Arc<AtomicU8>>,
 }
 
 const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
 const AP_STACK_START: usize = 0xffff_f000_c000_0000;
 
+const IST_STACK_SIZE: usize = 5 * Size4KiB::SIZE as usize;
+const IST_STACK_START: usize = 0xffff_f000_0000_0000;
+
 impl SmpCapability for X86_64 {
-    fn ap_init(boot_info: &LateBootInfo, entry: fn(&BootCpu) -> !) {
+    type Communicator = APBringupSync;
+
+    fn comm_init(boot_info: &LateBootInfo) -> Self::Communicator {
+        APBringupSync {
+            cores: boot_info
+                .mp_info
+                .as_ref()
+                .map(|mp_dat| {
+                    mp_dat
+                        .cpus
+                        .iter()
+                        .filter_map(|cpu| {
+                            (!cpu.is_bsp)
+                                .then_some(Arc::new(AtomicU8::new(CPUCoreState::Init as u8)))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    fn ap_init(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !, comm: Self::Communicator) {
         // for each ap processor enumerated in boot_info do
         // allocate a stack for that core and set it up properly
         // allocate GDT and TSS for the core and initialize
@@ -111,35 +152,49 @@ impl SmpCapability for X86_64 {
 
         // for this we actuallly need to share some atomic flags, gotta think about dataflow here
 
-        let Some(mp_info) = boot_info.mp_info else {
+        let Some(mp_info) = &boot_info.mp_info else {
             // TODO should return err such that we know that we are single core. Not fatal, but should be known
             return;
         };
 
-        for (i, cpu) in mp_info.cpus.iter().enumerate() {
-            if cpu.is_bsp {
-                continue;
-            }
+        let cr3 = Cr3::read();
 
+        for (i, (cpu, state)) in mp_info
+            .cpus
+            .iter()
+            .filter(|core| !core.is_bsp)
+            .zip(comm.cores.iter())
+            .enumerate()
+        {
             // allocate a stack
             // one guard page between each stack
-            let our_base = AP_STACK_START + i * AP_STACK_SIZE + Size4KiB::SIZE as usize;
+            // layout is
+            // START_ADDRESS
+            // ....
+            // STACK_SIZE
+            // ....
+            // GUARD_PAGE
+            // NEXT
+            // ....
+            let our_base = AP_STACK_START + i * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
 
-            let page_range = Page::<Size4KiB>::range_inclusive(
+            let page_range = Page::<Size4KiB>::range(
                 Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
                 Page::containing_address(x86_64::VirtAddr::new((our_base + AP_STACK_SIZE) as u64)),
             );
 
-            let frame_alloc = frame::get_frame_alloc().lock();
-            let pagetable = page::get_pagetable().lock();
+            let mut frame_alloc = frame::get_frame_alloc().lock();
+            let mut pagetable = page::get_pagetable().lock();
 
-            for page in page_range.into_iter() {
+            for page in page_range {
                 let frame = frame_alloc.allocate_frame().unwrap();
                 unsafe {
                     pagetable.map_to(
                         page,
                         frame,
-                        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::NO_EXECUTE,
                         &mut *frame_alloc,
                     )
                 }
@@ -147,14 +202,55 @@ impl SmpCapability for X86_64 {
                 .flush();
             }
 
-            let mut tss = TaskStateSegment::new();
-            tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-                const STACK_SIZE: usize = 4096 * 5;
-                static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+            drop(frame_alloc);
+            drop(pagetable);
 
-                let stack_start = VirtAddr::from_ptr(&raw const STACK);
-                stack_start + STACK_SIZE as u64
-            };
+            let stack = our_base + AP_STACK_SIZE;
+
+            let mut tss = TaskStateSegment::new();
+
+            // allocate ist
+            // one guard page between each stack
+            // layout is
+            // START_ADDRESS
+            // ....
+            // STACK_SIZE
+            // ....
+            // GUARD_PAGE
+            // NEXT
+            // ....
+            let our_ist_base = IST_STACK_START + i * (IST_STACK_SIZE + Size4KiB::SIZE as usize);
+            let page_range = Page::<Size4KiB>::range(
+                Page::containing_address(x86_64::VirtAddr::new(our_ist_base as u64)),
+                Page::containing_address(x86_64::VirtAddr::new(
+                    (our_ist_base + IST_STACK_SIZE) as u64,
+                )),
+            );
+
+            let mut frame_alloc = frame::get_frame_alloc().lock();
+            let mut pagetable = page::get_pagetable().lock();
+
+            for page in page_range {
+                let frame = frame_alloc.allocate_frame().unwrap();
+                unsafe {
+                    pagetable.map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::NO_EXECUTE,
+                        &mut *frame_alloc,
+                    )
+                }
+                .unwrap()
+                .flush();
+            }
+
+            drop(frame_alloc);
+            drop(pagetable);
+
+            tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] =
+                x86_64::VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64);
 
             let tss = Box::leak(Box::new(tss));
 
@@ -170,13 +266,14 @@ impl SmpCapability for X86_64 {
             };
 
             let my_packet = Box::leak(Box::new(CPUStartupData {
-                cpu,
-                stack: ManuallyDrop::new(NonNull::new(our_base as *mut u8).unwrap()),
+                cpu: *cpu,
+                stack: ManuallyDrop::new(NonNull::new(stack as *mut u8).unwrap()),
                 gdt,
                 tss,
                 selectors,
-                ready: Arc::new(AtomicU8::new(0)),
                 entry,
+                cr3,
+                state: state.clone(),
             }));
 
             (mp_info.start_cpu)(
@@ -185,19 +282,55 @@ impl SmpCapability for X86_64 {
                 my_packet as *mut CPUStartupData as usize,
             );
         }
-
-        todo!()
     }
 
-    fn ap_release() {
-        todo!()
+    fn ap_release(comm: Self::Communicator) {
+        for core in comm.cores.iter() {
+            while core.load(Ordering::Acquire) != CPUCoreState::Ready as u8 {
+                spin_loop();
+            }
+        }
+
+        for core in comm.cores {
+            core.store(CPUCoreState::Running as u8, Ordering::Release);
+        }
     }
 }
 
 fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     assert_ne!(arg, 0);
     let my_packet = unsafe { &*(arg as *const CPUStartupData) };
-    unsafe { core::arch::asm!("mov rsp, {}", my_packet.stack) };
+
+    unsafe {
+        Cr3::write(my_packet.cr3.0, my_packet.cr3.1);
+
+        core::arch::asm!(
+            "mov rsp, {top}", "xor ebp, ebp", "call {next}", "ud2",
+            top = in(reg) my_packet.stack.as_ptr(),
+            next = sym ap_main, in("rdi") cpu, in("rsi") my_packet,
+            options(noreturn),
+        );
+    }
+}
+
+extern "C" fn ap_main(cpu: BootCpu, my_packet: &'static CPUStartupData) -> ! {
+    my_packet.gdt.load();
+    unsafe {
+        CS::set_reg(my_packet.selectors.code_selector);
+        SS::set_reg(my_packet.selectors.data_selector);
+        load_tss(my_packet.selectors.tss_selector);
+    }
+
+    idt::IDT.get().unwrap().load();
+
+    my_packet
+        .state
+        .store(CPUCoreState::Ready as u8, Ordering::Release);
+
+    while my_packet.state.load(Ordering::Acquire) != CPUCoreState::Running as u8 {
+        spin_loop();
+    }
+
     (my_packet.entry)(cpu)
 }
 
@@ -283,7 +416,7 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
 impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     fn unmap(
         page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        _frame_deallocator: &mut impl arch_interfaces::mm::Framedeallocator<{ Size4KiB::SIZE as usize }>,
+        _frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
     ) -> Result<(PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush), PageTableError> {
         page::get_pagetable()
             .lock()
@@ -327,48 +460,6 @@ impl InterruptHandlingCapability for X86_64 {
     fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
         without_interrupts(f)
     }
-}
-
-#[repr(C, align(128))]
-pub struct PerCpu {
-    self_ptr: *const PerCpu, // gs:[0]
-    pub logical_id: usize,
-    pub hw_id: u32,
-    pub stack_top: usize,       // 16-byte aligned
-    tss: TaskStateSegment,      // own IST stacks (#DF, NMI)
-    gdt: GlobalDescriptorTable, // own GDT, one TSS descriptor
-    selectors: Selectors,
-}
-
-fn ap_entry(_: &BootCpu, arg: usize) -> ! {
-    // still on Limine's stack
-    let pc = unsafe { &*(arg as *const PerCpu) };
-    unsafe { switch_stack(pc.stack_top, ap_main, pc) }
-}
-
-unsafe fn switch_stack(top: usize, f: extern "C" fn(&'static PerCpu) -> !, arg: &PerCpu) -> ! {
-    unsafe {
-        core::arch::asm!(
-            "mov rsp, {top}", "xor ebp, ebp", "call {f}", "ud2",
-            top = in(reg) top, f = in(reg) f, in("rdi") arg,
-            options(noreturn)
-        )
-    }
-}
-
-extern "C" fn ap_main(pc: &'static PerCpu) -> ! {
-    apply_control_state(); // EFER.NXE, CR0.WP, CR4, PAT, before the CR3 switch
-    unsafe { Cr3::write(kernel_cr3(), flags) };
-    pc.load_gdt_and_tss(); // lgdt, reload CS/SS/DS, ltr
-    IDT.load(); // one shared IDT is fine
-    GsBase::write(VirtAddr::from_ptr(pc));
-    lapic::init_this_core(); // x2APIC: SVR (enable + spurious vector), TPR = 0
-    assert_eq!(lapic::id(), pc.hw_id);
-    AP_ONLINE.fetch_add(1, Ordering::Release);
-    serial_println!("CPU {} online", pc.logical_id);
-    loop {
-        x86_64::instructions::hlt()
-    } // interrupts stay disabled for the first milestone
 }
 
 static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {

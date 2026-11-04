@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<'a, A> arch_interfaces::mm::Framedeallocator<{ Size4KiB::SIZE as usize }>
+impl<'a, A> arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>
     for X86FrameAllocView<'a, A>
 where
     A: FrameDeallocator<Size4KiB>,

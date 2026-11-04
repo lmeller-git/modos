@@ -48,6 +48,9 @@ pub trait CpuDataCapability {
 }
 
 pub trait SmpCapability {
-    fn ap_init(boot_info: &LateBootInfo, entry: fn(&BootCpu) -> !) {}
-    fn ap_release() {}
+    type Communicator: Clone;
+
+    fn comm_init(boot_info: &LateBootInfo) -> Self::Communicator;
+    fn ap_init(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !, comm: Self::Communicator);
+    fn ap_release(comm: Self::Communicator);
 }

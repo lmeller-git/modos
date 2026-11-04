@@ -4,9 +4,10 @@
 extern crate alloc;
 
 use alloc::string::String;
-use core::str::FromStr;
+use core::{hint::spin_loop, str::FromStr};
 
-use arch::interface::{cpu::CpuDataCapability, init::InitCapability};
+use arch::interface::{cpu::SmpCapability, init::InitCapability};
+use boot::mp::BootCpu;
 use kernel::serial_println;
 use platform::{
     TargetPlatform,
@@ -24,7 +25,16 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::late_init(&boot_info).unwrap();
     serial_println!("Completed late init");
     let late_info = boot_info.into_late();
-    arch::TargetArch::core_init(&late_info);
+    let comm = arch::TargetArch::comm_init(&late_info);
+    arch::TargetArch::ap_init(&late_info, core_main, comm.clone());
+    arch::TargetArch::ap_release(comm);
 
     TargetPlatform::shutdown(ExitCode::Success)
+}
+
+fn core_main(cpu: BootCpu) -> ! {
+    serial_println!("Hello from cpu {:?}", cpu);
+    loop {
+        spin_loop();
+    }
 }
