@@ -12,7 +12,7 @@ use x86_64::{
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
-struct Selectors {
+pub(crate) struct Selectors {
     code_selector: SegmentSelector,
     data_selector: SegmentSelector,
     tss_selector: SegmentSelector,

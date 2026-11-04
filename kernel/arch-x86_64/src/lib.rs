@@ -19,26 +19,30 @@ use arch_interfaces::{
         TLBFlushCapability,
     },
 };
-use boot::{EarlyBootInfo, LateBootInfo};
+use boot::{EarlyBootInfo, LateBootInfo, mp::BootCpu};
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
     registers::control::{Cr4, Cr4Flags},
-    structures::paging::{
-        FrameAllocator,
-        FrameDeallocator,
-        Mapper,
-        Page,
-        PageSize,
-        PageTableFlags,
-        PhysFrame,
-        Size4KiB,
-        mapper::MapperFlush,
+    structures::{
+        gdt::GlobalDescriptorTable,
+        paging::{
+            FrameAllocator,
+            FrameDeallocator,
+            Mapper,
+            Page,
+            PageSize,
+            PageTableFlags,
+            PhysFrame,
+            Size4KiB,
+            mapper::MapperFlush,
+        },
+        tss::TaskStateSegment,
     },
 };
 
-use crate::{frame::X86FrameAllocView, pic::enable_timer};
+use crate::{frame::X86FrameAllocView, gdt::Selectors, pic::enable_timer};
 
 pub mod frame;
 mod gdt;
@@ -201,6 +205,48 @@ impl InterruptHandlingCapability for X86_64 {
     fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
         without_interrupts(f)
     }
+}
+
+#[repr(C, align(128))]
+pub struct PerCpu {
+    self_ptr: *const PerCpu, // gs:[0]
+    pub logical_id: usize,
+    pub hw_id: u32,
+    pub stack_top: usize,       // 16-byte aligned
+    tss: TaskStateSegment,      // own IST stacks (#DF, NMI)
+    gdt: GlobalDescriptorTable, // own GDT, one TSS descriptor
+    selectors: Selectors,
+}
+
+fn ap_entry(_: &BootCpu, arg: usize) -> ! {
+    // still on Limine's stack
+    let pc = unsafe { &*(arg as *const PerCpu) };
+    unsafe { switch_stack(pc.stack_top, ap_main, pc) }
+}
+
+unsafe fn switch_stack(top: usize, f: extern "C" fn(&'static PerCpu) -> !, arg: &PerCpu) -> ! {
+    unsafe {
+        core::arch::asm!(
+            "mov rsp, {top}", "xor ebp, ebp", "call {f}", "ud2",
+            top = in(reg) top, f = in(reg) f, in("rdi") arg,
+            options(noreturn)
+        )
+    }
+}
+
+extern "C" fn ap_main(pc: &'static PerCpu) -> ! {
+    apply_control_state(); // EFER.NXE, CR0.WP, CR4, PAT, before the CR3 switch
+    unsafe { Cr3::write(kernel_cr3(), flags) };
+    pc.load_gdt_and_tss(); // lgdt, reload CS/SS/DS, ltr
+    IDT.load(); // one shared IDT is fine
+    GsBase::write(VirtAddr::from_ptr(pc));
+    lapic::init_this_core(); // x2APIC: SVR (enable + spurious vector), TPR = 0
+    assert_eq!(lapic::id(), pc.hw_id);
+    AP_ONLINE.fetch_add(1, Ordering::Release);
+    serial_println!("CPU {} online", pc.logical_id);
+    loop {
+        x86_64::instructions::hlt()
+    } // interrupts stay disabled for the first milestone
 }
 
 static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {

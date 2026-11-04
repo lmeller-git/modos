@@ -5,7 +5,7 @@ use limine::{
     BaseRevision,
     RequestsEndMarker,
     RequestsStartMarker,
-    mp::MpInfo,
+    mp::{MP_FLAG_X2APIC, MpInfo},
     paging,
     request::{
         BootloaderInfoRequest,
@@ -57,7 +57,7 @@ pub(crate) static MODULES_REQUEST: ModulesRequest = ModulesRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static MP_REQUEST: MpRequest = MpRequest::new(0);
+pub(crate) static MP_REQUEST: MpRequest = MpRequest::new(MP_FLAG_X2APIC);
 
 #[used]
 #[unsafe(link_section = ".requests")]
