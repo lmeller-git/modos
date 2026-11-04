@@ -1,4 +1,4 @@
-use boot::LateBootInfo;
+use boot::{LateBootInfo, mp::BootCpu};
 use derive_more::{Binary, Display, LowerHex, Octal, UpperHex};
 
 #[derive(
@@ -48,6 +48,6 @@ pub trait CpuDataCapability {
 }
 
 pub trait SmpCapability {
-    fn ap_init(boot_info: &LateBootInfo) {}
+    fn ap_init(boot_info: &LateBootInfo, entry: fn(&BootCpu) -> !) {}
     fn ap_release() {}
 }

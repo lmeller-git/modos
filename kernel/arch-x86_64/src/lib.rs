@@ -1,7 +1,10 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
 
-use core::fmt::Arguments;
+extern crate alloc;
+
+use alloc::{boxed::Box, sync::Arc};
+use core::{fmt::Arguments, mem::ManuallyDrop, ptr::NonNull, sync::atomic::AtomicU8};
 
 use arch_interfaces::{
     cpu::{CpuDataCapability, SmpCapability},
@@ -9,7 +12,7 @@ use arch_interfaces::{
     interrupt::InterruptHandlingCapability,
     mm::{
         FrameAllocatorCapability,
-        FrameDeAllocatorCapability,
+        FrameDeallocatorCapability,
         MemMapperCapability,
         MemUnmapperCapability,
         PageTableError,
@@ -42,7 +45,11 @@ use x86_64::{
     },
 };
 
-use crate::{frame::X86FrameAllocView, gdt::Selectors, pic::enable_timer};
+use crate::{
+    frame::X86FrameAllocView,
+    gdt::{DOUBLE_FAULT_IST_INDEX, Selectors},
+    pic::enable_timer,
+};
 
 pub mod frame;
 mod gdt;
@@ -69,14 +76,129 @@ impl InitCapability for X86_64 {
 
 impl CpuDataCapability for X86_64 {}
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CPUCoreState {
+    Init,
+    Ready,
+    Running,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct CPUStartupData {
+    cpu: &'static BootCpu,
+    stack: ManuallyDrop<NonNull<u8>>,
+    gdt: GlobalDescriptorTable,
+    selectors: Selectors,
+    tss: &'static mut TaskStateSegment,
+    ready: Arc<AtomicU8>,
+    entry: fn(&BootCpu) -> !,
+}
+
+const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
+const AP_STACK_START: usize = 0xffff_f000_c000_0000;
+
 impl SmpCapability for X86_64 {
-    fn ap_init(boot_info: &LateBootInfo) {
+    fn ap_init(boot_info: &LateBootInfo, entry: fn(&BootCpu) -> !) {
+        // for each ap processor enumerated in boot_info do
+        // allocate a stack for that core and set it up properly
+        // allocate GDT and TSS for the core and initialize
+        // store ptr to global pagetable such that we can then write it immediately on the new ap
+        // wait until bsp is ready
+        //
+        // I.e. we build a CPUStartupData, pass it to the start_cpu() function of the next core, who will then switch stack, install important structures and busy wait.
+
+        // for this we actuallly need to share some atomic flags, gotta think about dataflow here
+
+        let Some(mp_info) = boot_info.mp_info else {
+            // TODO should return err such that we know that we are single core. Not fatal, but should be known
+            return;
+        };
+
+        for (i, cpu) in mp_info.cpus.iter().enumerate() {
+            if cpu.is_bsp {
+                continue;
+            }
+
+            // allocate a stack
+            // one guard page between each stack
+            let our_base = AP_STACK_START + i * AP_STACK_SIZE + Size4KiB::SIZE as usize;
+
+            let page_range = Page::<Size4KiB>::range_inclusive(
+                Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
+                Page::containing_address(x86_64::VirtAddr::new((our_base + AP_STACK_SIZE) as u64)),
+            );
+
+            let frame_alloc = frame::get_frame_alloc().lock();
+            let pagetable = page::get_pagetable().lock();
+
+            for page in page_range.into_iter() {
+                let frame = frame_alloc.allocate_frame().unwrap();
+                unsafe {
+                    pagetable.map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+                        &mut *frame_alloc,
+                    )
+                }
+                .unwrap()
+                .flush();
+            }
+
+            let mut tss = TaskStateSegment::new();
+            tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
+                const STACK_SIZE: usize = 4096 * 5;
+                static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+                let stack_start = VirtAddr::from_ptr(&raw const STACK);
+                stack_start + STACK_SIZE as u64
+            };
+
+            let tss = Box::leak(Box::new(tss));
+
+            let mut gdt = GlobalDescriptorTable::new();
+            let code_selector = gdt.append(Descriptor::kernel_code_segment());
+            let tss_selector = gdt.append(Descriptor::tss_segment(tss));
+            let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
+
+            let selectors = Selectors {
+                code_selector,
+                tss_selector,
+                data_selector: kernel_data_selector,
+            };
+
+            let my_packet = Box::leak(Box::new(CPUStartupData {
+                cpu,
+                stack: ManuallyDrop::new(NonNull::new(our_base as *mut u8).unwrap()),
+                gdt,
+                tss,
+                selectors,
+                ready: Arc::new(AtomicU8::new(0)),
+                entry,
+            }));
+
+            (mp_info.start_cpu)(
+                cpu,
+                core_startup_trampoline,
+                my_packet as *mut CPUStartupData as usize,
+            );
+        }
+
         todo!()
     }
 
     fn ap_release() {
         todo!()
     }
+}
+
+fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
+    assert_ne!(arg, 0);
+    let my_packet = unsafe { &*(arg as *const CPUStartupData) };
+    unsafe { core::arch::asm!("mov rsp, {}", my_packet.stack) };
+    (my_packet.entry)(cpu)
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -90,7 +212,7 @@ impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     }
 }
 
-impl FrameDeAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+impl FrameDeallocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     unsafe fn deallocate(frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>) -> Result<(), ()> {
         unsafe {
             frame::get_frame_alloc().lock().deallocate_frame(
@@ -161,7 +283,7 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
 impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     fn unmap(
         page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        _frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
+        _frame_deallocator: &mut impl arch_interfaces::mm::Framedeallocator<{ Size4KiB::SIZE as usize }>,
     ) -> Result<(PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush), PageTableError> {
         page::get_pagetable()
             .lock()

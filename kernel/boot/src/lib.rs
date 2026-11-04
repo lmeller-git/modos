@@ -67,6 +67,7 @@ pub mod mp {
     use alloc::boxed::Box;
 
     #[derive(Clone, Copy)]
+    #[repr(C)]
     pub struct BootCpu {
         pub logical_id: usize,
         pub hw_id: u32,

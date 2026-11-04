@@ -10,7 +10,7 @@ use arch_interfaces::{
     interrupt::InterruptHandlingCapability,
     mm::{
         FrameAllocatorCapability,
-        FrameDeAllocatorCapability,
+        FrameDeallocatorCapability,
         MemMapperCapability,
         MemUnmapperCapability,
     },
@@ -25,7 +25,7 @@ pub trait SupportedArch:
     CpuDataCapability
     + InterruptHandlingCapability
     + FrameAllocatorCapability
-    + FrameDeAllocatorCapability
+    + FrameDeallocatorCapability
     + MemMapperCapability
     + MemUnmapperCapability
     + InitCapability

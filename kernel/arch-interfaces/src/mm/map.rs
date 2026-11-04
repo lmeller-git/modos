@@ -2,7 +2,7 @@ use derive_more::Display;
 use thiserror::Error;
 
 use crate::mm::{
-    FrameDeallocator,
+    Framedeallocator,
     addr::{PhysAddr, VirtAddr},
     allocr::FrameAllocator,
 };
@@ -230,7 +230,7 @@ pub trait MemUnmapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
 {
     fn unmap(
         page: VirtMemoryFrame<FRAME_SIZE>,
-        frame_deallocator: &mut impl FrameDeallocator<FRAME_SIZE>,
+        frame_deallocator: &mut impl Framedeallocator<FRAME_SIZE>,
     ) -> Result<(PhysMemoryFrame<FRAME_SIZE>, Self::Flush), PageTableError>;
 }
 

@@ -13,10 +13,13 @@ use x86_64::{
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 pub(crate) struct Selectors {
-    code_selector: SegmentSelector,
-    data_selector: SegmentSelector,
-    tss_selector: SegmentSelector,
+    pub(crate) code_selector: SegmentSelector,
+    pub(crate) data_selector: SegmentSelector,
+    pub(crate) tss_selector: SegmentSelector,
 }
+
+// TODO this should not need to be static on bsp, no?
+// Maybe refactor such that the whole thing is similar across all cores, not bsp vs ap
 
 static TSS: OnceCell<Mutex<TaskStateSegment>> = OnceCell::uninit();
 
