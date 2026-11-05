@@ -1,78 +1,89 @@
-use core::ptr;
-
-use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use x86_64::{
     VirtAddr,
+    instructions::tables::load_tss,
+    registers::segmentation::{CS, SS, Segment},
     structures::{
         gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+        paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
         tss::TaskStateSegment,
     },
 };
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+const IST_STACK_SIZE: usize = 5 * Size4KiB::SIZE as usize;
+const IST_STACK_START: usize = 0xffff_f000_0000_0000;
 
-struct Selectors {
-    code_selector: SegmentSelector,
-    data_selector: SegmentSelector,
-    tss_selector: SegmentSelector,
+pub(crate) struct Selectors {
+    pub(crate) code_selector: SegmentSelector,
+    pub(crate) data_selector: SegmentSelector,
+    pub(crate) tss_selector: SegmentSelector,
 }
 
-static TSS: OnceCell<Mutex<TaskStateSegment>> = OnceCell::uninit();
+pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
+    let mut tss = TaskStateSegment::new();
 
-static GDT: OnceCell<(GlobalDescriptorTable, Selectors)> = OnceCell::uninit();
+    // allocate ist
+    // one guard page between each stack
+    // layout is
+    // START_ADDRESS
+    // ....
+    // STACK_SIZE
+    // ....
+    // GUARD_PAGE
+    // NEXT
+    // ....
+    let our_ist_base = IST_STACK_START + core_id * (IST_STACK_SIZE + Size4KiB::SIZE as usize);
+    let page_range = Page::<Size4KiB>::range(
+        Page::containing_address(VirtAddr::new(our_ist_base as u64)),
+        Page::containing_address(VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64)),
+    );
 
-pub(crate) fn init_tss() -> &'static TaskStateSegment {
-    TSS.init_once(|| {
-        Mutex::new({
-            let mut tss = TaskStateSegment::new();
-            tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-                const STACK_SIZE: usize = 4096 * 5;
-                static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+    let mut frame_alloc = crate::frame::get_frame_alloc().lock();
+    let mut pagetable = crate::page::get_pagetable().lock();
 
-                let stack_start = VirtAddr::from_ptr(&raw const STACK);
-                stack_start + STACK_SIZE as u64
-            };
-            tss
-        })
-    });
-    unsafe { &*(&*TSS.get_unchecked().lock() as *const TaskStateSegment) }
+    for page in page_range {
+        let frame = frame_alloc.allocate_frame().unwrap();
+        unsafe {
+            pagetable.map_to(
+                page,
+                frame,
+                PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
+                &mut *frame_alloc,
+            )
+        }
+        .unwrap()
+        .flush();
+    }
+
+    drop(frame_alloc);
+    drop(pagetable);
+
+    tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] =
+        VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64);
+    tss
 }
 
-pub(crate) fn init_gdt(tss: &'static TaskStateSegment) {
-    GDT.init_once(|| {
-        let mut gdt = GlobalDescriptorTable::new();
-        let code_selector = gdt.append(Descriptor::kernel_code_segment());
-        let tss_selector = gdt.append(Descriptor::tss_segment(tss));
-        let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
-        (
-            gdt,
-            Selectors {
-                code_selector,
-                tss_selector,
-                data_selector: kernel_data_selector,
-            },
-        )
-    });
+pub(crate) fn build_gdt(tss: &'static TaskStateSegment) -> (GlobalDescriptorTable, Selectors) {
+    let mut gdt = GlobalDescriptorTable::new();
+    let code_selector = gdt.append(Descriptor::kernel_code_segment());
+    let tss_selector = gdt.append(Descriptor::tss_segment(tss));
+    let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
+
+    (
+        gdt,
+        Selectors {
+            code_selector,
+            tss_selector,
+            data_selector: kernel_data_selector,
+        },
+    )
 }
 
-pub(crate) fn init() {
-    use x86_64::instructions::{
-        segmentation::{CS, SS, Segment},
-        tables::load_tss,
-    };
-
-    let tss = init_tss();
-
-    assert!(ptr::eq(tss, &*TSS.get().unwrap().lock()));
-
-    init_gdt(tss);
-
+pub(crate) fn load_gdt_tss(gdt: &'static GlobalDescriptorTable, selectors: &Selectors) {
     unsafe {
-        let gdt = GDT.get_unchecked();
-        gdt.0.load();
-        CS::set_reg(gdt.1.code_selector);
-        SS::set_reg(gdt.1.data_selector);
-        load_tss(gdt.1.tss_selector);
+        gdt.load();
+        CS::set_reg(selectors.code_selector);
+        SS::set_reg(selectors.data_selector);
+        load_tss(selectors.tss_selector);
     }
 }

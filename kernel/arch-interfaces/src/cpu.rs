@@ -1,4 +1,4 @@
-use boot::LateBootInfo;
+use boot::{LateBootInfo, mp::BootCpu};
 use derive_more::{Binary, Display, LowerHex, Octal, UpperHex};
 
 #[derive(
@@ -25,13 +25,12 @@ impl CpuId {
     }
 }
 
-pub trait CpuHandlingCapability {
-    fn core_init(boot_info: &LateBootInfo);
+pub trait CpuDataCapability {
     fn cpu_count() -> u32 {
         1
     }
 
-    fn bootstrap_cpu() -> Option<CpuId> {
+    fn core_init(_boot_info: &LateBootInfo, _core_id: usize) -> Option<CpuId> {
         None
     }
 
@@ -46,4 +45,12 @@ pub trait CpuHandlingCapability {
     fn cpus() -> impl Iterator<Item = CpuId> {
         core::iter::once(Self::current_cpu())
     }
+}
+
+pub trait SmpCapability {
+    type Communicator: Clone;
+
+    fn comm_init(boot_info: &LateBootInfo) -> Self::Communicator;
+    fn ap_init(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !, comm: Self::Communicator);
+    fn ap_release(comm: Self::Communicator);
 }

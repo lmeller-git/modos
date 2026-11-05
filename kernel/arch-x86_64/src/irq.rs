@@ -54,9 +54,7 @@ pub(super) extern "x86-interrupt" fn gpf_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    panic!(
-        "EXCEPTION: GENERAL PROTECTION FAULT\n{stack_frame:#?}\nError Code: {error_code:b}"
-    );
+    panic!("EXCEPTION: GENERAL PROTECTION FAULT\n{stack_frame:#?}\nError Code: {error_code:b}");
 }
 
 pub(super) const SPURIOUS_VECTOR: u8 = 0xFF;

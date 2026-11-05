@@ -66,7 +66,8 @@ pub mod memmap {
 pub mod mp {
     use alloc::boxed::Box;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    #[repr(C)]
     pub struct BootCpu {
         pub logical_id: usize,
         pub hw_id: u32,

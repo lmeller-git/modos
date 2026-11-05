@@ -5,12 +5,12 @@ pub mod mm;
 // we reexport arch-interfaces, such that consumers doont have to depend on both crates always
 pub use arch_interfaces as interface;
 use arch_interfaces::{
-    cpu::CpuHandlingCapability,
+    cpu::CpuDataCapability,
     init::InitCapability,
     interrupt::InterruptHandlingCapability,
     mm::{
         FrameAllocatorCapability,
-        FrameDeAllocatorCapability,
+        FrameDeallocatorCapability,
         MemMapperCapability,
         MemUnmapperCapability,
     },
@@ -22,10 +22,10 @@ pub type TargetArch = arch_x86_64::X86_64;
 pub struct TargetArch;
 
 pub trait SupportedArch:
-    CpuHandlingCapability
+    CpuDataCapability
     + InterruptHandlingCapability
     + FrameAllocatorCapability
-    + FrameDeAllocatorCapability
+    + FrameDeallocatorCapability
     + MemMapperCapability
     + MemUnmapperCapability
     + InitCapability

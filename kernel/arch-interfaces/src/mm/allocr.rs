@@ -12,6 +12,6 @@ pub trait FrameAllocatorCapability<const SIZE: usize = FRAME_4KIB_SIZE> {
     fn allocate() -> Option<PhysMemoryFrame<SIZE>>;
 }
 
-pub trait FrameDeAllocatorCapability<const SIZE: usize = FRAME_4KIB_SIZE> {
+pub trait FrameDeallocatorCapability<const SIZE: usize = FRAME_4KIB_SIZE> {
     unsafe fn deallocate(frame: PhysMemoryFrame<SIZE>) -> Result<(), ()>;
 }
