@@ -47,17 +47,23 @@ impl LinkedListFrameAllocator {
         let table_bytes =
             (capacity * size_of::<Region>()).next_multiple_of(Size4KiB::SIZE as usize);
 
+        // TODO:
+        // We reverse the memmap here, because for some reason low regions are marked as useable while being used by limine at the same time.
+        // If we allocate these regions to heap, ... while we still use tehm (bootinfo, ...) we may crash.
+        // Should consult docs for a more robust fix here.
         let host = memmap
             .iter()
+            .rev()
             .find(|e| is_usable(e) && e.length as usize >= table_bytes)
             .expect("no usable region can host the region table");
 
+        assert_eq!(host.base, align_up(host.base, Size4KiB::SIZE));
         let ptr = (hhdm_offset + host.base as usize) as *mut Region;
         unsafe { core::ptr::write_bytes(ptr as *mut u8, 0, table_bytes) };
         let regions = unsafe { core::slice::from_raw_parts_mut(ptr, capacity) };
 
         let mut count = 0;
-        for e in memmap.iter().filter(|e| e.type_ == MEMMAP_USABLE) {
+        for e in memmap.iter().rev().filter(|e| e.type_ == MEMMAP_USABLE) {
             let mut base = align_up(e.base, Size4KiB::SIZE) as usize;
             let end = align_down(e.base + e.length, Size4KiB::SIZE) as usize;
 

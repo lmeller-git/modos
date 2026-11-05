@@ -9,7 +9,7 @@ use x86_64::{
     },
 };
 
-const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 const IST_STACK_SIZE: usize = 5 * Size4KiB::SIZE as usize;
 const IST_STACK_START: usize = 0xffff_f000_0000_0000;
 

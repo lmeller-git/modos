@@ -110,8 +110,6 @@ struct CPUData {
     tss: &'static TaskStateSegment,
 }
 
-unsafe impl Send for CPUData {}
-
 #[repr(C)]
 struct CPUStartupData {
     data: &'static mut CPUData,
@@ -127,9 +125,6 @@ pub struct APBringupSync {
 
 const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
 const AP_STACK_START: usize = 0xffff_f000_c000_0000;
-
-const IST_STACK_SIZE: usize = 5 * Size4KiB::SIZE as usize;
-const IST_STACK_START: usize = 0xffff_f000_0000_0000;
 
 impl SmpCapability for X86_64 {
     type Communicator = APBringupSync;
@@ -165,13 +160,16 @@ impl SmpCapability for X86_64 {
         // for this we actuallly need to share some atomic flags, gotta think about dataflow here
 
         let Some(mp_info) = &boot_info.mp_info else {
+            serial_println!("No smp");
             // TODO should return err such that we know that we are single core. Not fatal, but should be known
             return;
         };
 
+        serial_println!("cores: {}", mp_info.cpus.len());
+
         let cr3 = Cr3::read();
 
-        for (i, (cpu, state)) in mp_info
+        for (_i, (cpu, state)) in mp_info
             .cpus
             .iter()
             .filter(|core| !core.is_bsp)
@@ -188,7 +186,8 @@ impl SmpCapability for X86_64 {
             // GUARD_PAGE
             // NEXT
             // ....
-            let our_base = AP_STACK_START + i * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
+            let our_base =
+                AP_STACK_START + cpu.logical_id * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
 
             let page_range = Page::<Size4KiB>::range(
                 Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
@@ -233,6 +232,7 @@ impl SmpCapability for X86_64 {
                 selectors,
             };
             let data = Box::leak(Box::new(data));
+            data.self_ptr = data as *const CPUData;
 
             let my_packet = Box::leak(Box::new(CPUStartupData {
                 data,
@@ -278,7 +278,7 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     }
 }
 
-extern "C" fn ap_main(cpu: BootCpu, my_packet: &'static CPUStartupData) -> ! {
+extern "C" fn ap_main(cpu: &BootCpu, my_packet: &'static CPUStartupData) -> ! {
     load_gdt_tss(&my_packet.data.gdt, &my_packet.data.selectors);
 
     idt::IDT.get().unwrap().load();
@@ -294,7 +294,7 @@ extern "C" fn ap_main(cpu: BootCpu, my_packet: &'static CPUStartupData) -> ! {
         spin_loop();
     }
 
-    (my_packet.entry)(cpu)
+    (my_packet.entry)(*cpu)
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -477,6 +477,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
     let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
 
     GsBase::write(my_data_ptr);
+    load_gdt_tss(&my_data.gdt, &my_data.selectors);
 
     idt::init_idt();
     pic::init_apic(

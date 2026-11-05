@@ -4,3 +4,4 @@
 /target
 *.iso
 *.hdd
+qemu.log

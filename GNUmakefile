@@ -14,7 +14,7 @@ RUST_PROFILE     ?= dev
 CARGO_FLAGS      ?=
 CARGO_TARGET_DIR ?= target
 IMAGE_NAME       ?= modos
-QEMUFLAGS        ?= -m 12G
+QEMUFLAGS        ?= -m 12G -smp 4 -d int,cpu_reset -D qemu.log -no-reboot
 QEMU_WRAPPER     ?= ./scripts/run_qemu.sh
 LIMINE_BRANCH    ?= v11.x-binary
 

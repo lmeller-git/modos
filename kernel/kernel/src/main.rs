@@ -29,6 +29,10 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::ap_init(&late_info, core_main, comm.clone());
     arch::TargetArch::ap_release(comm);
 
+    for _ in 0..10000 {
+        spin_loop();
+    }
+
     TargetPlatform::shutdown(ExitCode::Success)
 }
 
