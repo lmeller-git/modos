@@ -8,7 +8,7 @@ use core::{
     fmt::Arguments,
     hint::spin_loop,
     mem::ManuallyDrop,
-    ptr::NonNull,
+    ptr::{NonNull, null},
     sync::atomic::{AtomicU8, Ordering},
 };
 
@@ -32,16 +32,13 @@ use boot::{EarlyBootInfo, LateBootInfo, mp::BootCpu};
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
-    instructions::{
-        interrupts::{self, without_interrupts},
-        tables::load_tss,
-    },
+    instructions::interrupts::{self, without_interrupts},
     registers::{
         control::{Cr3, Cr3Flags, Cr4, Cr4Flags},
-        segmentation::{CS, SS, Segment},
+        model_specific::GsBase,
     },
     structures::{
-        gdt::{Descriptor, GlobalDescriptorTable},
+        gdt::GlobalDescriptorTable,
         paging::{
             FrameAllocator,
             FrameDeallocator,
@@ -59,7 +56,7 @@ use x86_64::{
 
 use crate::{
     frame::X86FrameAllocView,
-    gdt::{DOUBLE_FAULT_IST_INDEX, Selectors},
+    gdt::{Selectors, build_gdt, build_tss, load_gdt_tss},
     pic::enable_timer,
 };
 
@@ -80,13 +77,20 @@ impl InitCapability for X86_64 {
         Ok(())
     }
 
-    fn late_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
+    fn late_init(boot_info: &LateBootInfo) -> Result<(), arch_interfaces::init::InitError> {
         late_init(boot_info);
         Ok(())
     }
 }
 
-impl CpuDataCapability for X86_64 {}
+impl CpuDataCapability for X86_64 {
+    fn core_init(
+        _boot_info: &LateBootInfo,
+        _core_id: usize,
+    ) -> Option<arch_interfaces::cpu::CpuId> {
+        None
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -97,12 +101,20 @@ enum CPUCoreState {
 }
 
 #[repr(C)]
-struct CPUStartupData {
+struct CPUData {
+    self_ptr: *const CPUData,
     cpu: BootCpu,
     stack: ManuallyDrop<NonNull<u8>>,
     gdt: GlobalDescriptorTable,
     selectors: Selectors,
     tss: &'static TaskStateSegment,
+}
+
+unsafe impl Send for CPUData {}
+
+#[repr(C)]
+struct CPUStartupData {
+    data: &'static mut CPUData,
     entry: fn(BootCpu) -> !,
     cr3: (PhysFrame<Size4KiB>, Cr3Flags),
     state: Arc<AtomicU8>,
@@ -207,70 +219,23 @@ impl SmpCapability for X86_64 {
 
             let stack = our_base + AP_STACK_SIZE;
 
-            let mut tss = TaskStateSegment::new();
-
-            // allocate ist
-            // one guard page between each stack
-            // layout is
-            // START_ADDRESS
-            // ....
-            // STACK_SIZE
-            // ....
-            // GUARD_PAGE
-            // NEXT
-            // ....
-            let our_ist_base = IST_STACK_START + i * (IST_STACK_SIZE + Size4KiB::SIZE as usize);
-            let page_range = Page::<Size4KiB>::range(
-                Page::containing_address(x86_64::VirtAddr::new(our_ist_base as u64)),
-                Page::containing_address(x86_64::VirtAddr::new(
-                    (our_ist_base + IST_STACK_SIZE) as u64,
-                )),
-            );
-
-            let mut frame_alloc = frame::get_frame_alloc().lock();
-            let mut pagetable = page::get_pagetable().lock();
-
-            for page in page_range {
-                let frame = frame_alloc.allocate_frame().unwrap();
-                unsafe {
-                    pagetable.map_to(
-                        page,
-                        frame,
-                        PageTableFlags::PRESENT
-                            | PageTableFlags::WRITABLE
-                            | PageTableFlags::NO_EXECUTE,
-                        &mut *frame_alloc,
-                    )
-                }
-                .unwrap()
-                .flush();
-            }
-
-            drop(frame_alloc);
-            drop(pagetable);
-
-            tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] =
-                x86_64::VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64);
-
+            let tss = build_tss(cpu.logical_id);
             let tss = Box::leak(Box::new(tss));
 
-            let mut gdt = GlobalDescriptorTable::new();
-            let code_selector = gdt.append(Descriptor::kernel_code_segment());
-            let tss_selector = gdt.append(Descriptor::tss_segment(tss));
-            let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
+            let (gdt, selectors) = build_gdt(tss);
 
-            let selectors = Selectors {
-                code_selector,
-                tss_selector,
-                data_selector: kernel_data_selector,
-            };
-
-            let my_packet = Box::leak(Box::new(CPUStartupData {
+            let data = CPUData {
+                self_ptr: null(),
                 cpu: *cpu,
                 stack: ManuallyDrop::new(NonNull::new(stack as *mut u8).unwrap()),
                 gdt,
                 tss,
                 selectors,
+            };
+            let data = Box::leak(Box::new(data));
+
+            let my_packet = Box::leak(Box::new(CPUStartupData {
+                data,
                 entry,
                 cr3,
                 state: state.clone(),
@@ -306,7 +271,7 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
 
         core::arch::asm!(
             "mov rsp, {top}", "xor ebp, ebp", "call {next}", "ud2",
-            top = in(reg) my_packet.stack.as_ptr(),
+            top = in(reg) my_packet.data.stack.as_ptr(),
             next = sym ap_main, in("rdi") cpu, in("rsi") my_packet,
             options(noreturn),
         );
@@ -314,14 +279,12 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
 }
 
 extern "C" fn ap_main(cpu: BootCpu, my_packet: &'static CPUStartupData) -> ! {
-    my_packet.gdt.load();
-    unsafe {
-        CS::set_reg(my_packet.selectors.code_selector);
-        SS::set_reg(my_packet.selectors.data_selector);
-        load_tss(my_packet.selectors.tss_selector);
-    }
+    load_gdt_tss(&my_packet.data.gdt, &my_packet.data.selectors);
 
     idt::IDT.get().unwrap().load();
+
+    let my_data_ptr = x86_64::VirtAddr::from_ptr(my_packet.data as *const CPUData);
+    GsBase::write(my_data_ptr);
 
     my_packet
         .state
@@ -478,8 +441,43 @@ pub fn early_init(boot_info: &EarlyBootInfo<'_>) {
     init_xmm();
 }
 
-pub fn late_init(boot_info: &EarlyBootInfo<'_>) {
-    gdt::init();
+pub fn late_init(boot_info: &LateBootInfo) {
+    let my_cpu = boot_info
+        .mp_info
+        .as_ref()
+        .map(|info| {
+            info.cpus
+                .iter()
+                .find(|cpu| cpu.is_bsp)
+                .and_then(|cpu| Some(cpu))
+        })
+        .flatten()
+        .unwrap_or(&BootCpu {
+            logical_id: 0,
+            hw_id: 0,
+            is_bsp: true,
+        });
+
+    let tss = build_tss(my_cpu.logical_id);
+    let tss = Box::leak(Box::new(tss));
+    let (gdt, selectors) = build_gdt(tss);
+
+    let my_data = CPUData {
+        self_ptr: null(),
+        cpu: *my_cpu,
+        stack: ManuallyDrop::new(NonNull::dangling()), // TODO switch stack?
+        gdt,
+        selectors,
+        tss,
+    };
+
+    let my_data = Box::leak(Box::new(my_data));
+    my_data.self_ptr = my_data as *const CPUData;
+
+    let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
+
+    GsBase::write(my_data_ptr);
+
     idt::init_idt();
     pic::init_apic(
         boot_info.hhdm_offset.unwrap(),

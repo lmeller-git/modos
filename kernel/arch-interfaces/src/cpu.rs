@@ -30,7 +30,7 @@ pub trait CpuDataCapability {
         1
     }
 
-    fn bootstrap_cpu() -> Option<CpuId> {
+    fn core_init(_boot_info: &LateBootInfo, _core_id: usize) -> Option<CpuId> {
         None
     }
 

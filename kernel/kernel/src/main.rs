@@ -22,9 +22,9 @@ unsafe extern "C" fn _start() -> ! {
     early_heap::init();
     let string = String::from_str("Hello world");
     serial_println!("We allocated this on the heap: {:?}", string);
-    arch::TargetArch::late_init(&boot_info).unwrap();
-    serial_println!("Completed late init");
     let late_info = boot_info.into_late();
+    arch::TargetArch::late_init(&late_info).unwrap();
+    serial_println!("Completed late init");
     let comm = arch::TargetArch::comm_init(&late_info);
     arch::TargetArch::ap_init(&late_info, core_main, comm.clone());
     arch::TargetArch::ap_release(comm);
