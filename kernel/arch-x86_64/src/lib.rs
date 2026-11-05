@@ -34,8 +34,8 @@ use uart_16550::SerialPort;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
     registers::{
-        control::{Cr3, Cr3Flags, Cr4, Cr4Flags},
-        model_specific::GsBase,
+        control::{Cr0, Cr3, Cr3Flags, Cr4, Cr4Flags},
+        model_specific::{GsBase, Msr},
     },
     structures::{
         gdt::GlobalDescriptorTable,
@@ -114,13 +114,42 @@ struct CPUData {
 struct CPUStartupData {
     data: &'static mut CPUData,
     entry: fn(BootCpu) -> !,
-    cr3: (PhysFrame<Size4KiB>, Cr3Flags),
+    cs: ControlState,
     state: Arc<AtomicU8>,
 }
 
 #[derive(Clone, Debug)]
 pub struct APBringupSync {
     cores: Vec<Arc<AtomicU8>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ControlState {
+    efer: u64,
+    cr0: u64,
+    cr4: u64,
+    pat: u64,
+    cr3: (PhysFrame<Size4KiB>, u16),
+}
+
+fn capture_cs() -> ControlState {
+    ControlState {
+        efer: unsafe { Msr::new(0xC000_0080).read() },
+        cr0: Cr0::read_raw(),
+        cr4: Cr4::read_raw(),
+        pat: unsafe { Msr::new(0x277).read() },
+        cr3: Cr3::read_raw(),
+    }
+}
+
+unsafe fn apply_cs(s: &ControlState) {
+    unsafe {
+        Msr::new(0xC000_0080).write(s.efer);
+        Cr0::write_raw(s.cr0);
+        Cr4::write_raw(s.cr4);
+        Msr::new(0x277).write(s.pat);
+        Cr3::write_raw(s.cr3.0, s.cr3.1);
+    }
 }
 
 const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
@@ -167,7 +196,7 @@ impl SmpCapability for X86_64 {
 
         serial_println!("cores: {}", mp_info.cpus.len());
 
-        let cr3 = Cr3::read();
+        let cs = capture_cs();
 
         for (_i, (cpu, state)) in mp_info
             .cpus
@@ -237,7 +266,7 @@ impl SmpCapability for X86_64 {
             let my_packet = Box::leak(Box::new(CPUStartupData {
                 data,
                 entry,
-                cr3,
+                cs,
                 state: state.clone(),
             }));
 
@@ -267,7 +296,7 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     let my_packet = unsafe { &*(arg as *const CPUStartupData) };
 
     unsafe {
-        Cr3::write(my_packet.cr3.0, my_packet.cr3.1);
+        apply_cs(&my_packet.cs);
 
         core::arch::asm!(
             "mov rsp, {top}", "xor ebp, ebp", "call {next}", "ud2",
