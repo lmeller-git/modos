@@ -6,8 +6,10 @@ extern crate alloc;
 use alloc::string::String;
 use core::{hint::spin_loop, str::FromStr};
 
-use arch::interface::{cpu::SmpCapability, init::InitCapability};
-use boot::mp::BootCpu;
+use arch::interface::{
+    cpu::{CpuDataCapability, SmpCapability},
+    init::InitCapability,
+};
 use kernel::serial_println;
 use platform::{
     TargetPlatform,
@@ -36,12 +38,9 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::core_release(init_once, late_info, core_main)
 }
 
-fn core_main(cpu: BootCpu) -> ! {
+fn core_main() -> ! {
+    let cpu = arch::TargetArch::my_cpu();
     serial_println!("Hello from cpu {:?}", cpu);
-    if cpu.is_bsp {
-        // TODO
-        // cleanup
-    }
 
     for _ in 0..1000000 {
         spin_loop();

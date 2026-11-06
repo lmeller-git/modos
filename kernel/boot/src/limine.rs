@@ -140,14 +140,14 @@ pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInf
 }
 
 struct StartPacket {
-    cpu: BootCpu,
     entry: CpuEntry,
     arg: usize,
 }
 
 unsafe extern "C" fn ap_trampoline(info: &MpInfo) -> ! {
-    let packet = unsafe { &*(info.extra_argument() as *const StartPacket) };
-    (packet.entry)(&packet.cpu, packet.arg)
+    let StartPacket { entry, arg } =
+        *unsafe { Box::from_raw(info.extra_argument() as *mut StartPacket) };
+    (entry)(arg)
 }
 
 fn start_cpu(cpu: &BootCpu, entry: CpuEntry, arg: usize) {
@@ -158,10 +158,6 @@ fn start_cpu(cpu: &BootCpu, entry: CpuEntry, arg: usize) {
         .iter()
         .find(|i| i.lapic_id == cpu.hw_id)
         .unwrap();
-    let packet = Box::leak(Box::new(StartPacket {
-        cpu: *cpu,
-        entry,
-        arg,
-    }));
+    let packet = Box::leak(Box::new(StartPacket { entry, arg }));
     info.bootstrap(ap_trampoline, packet as *mut _ as u64);
 }

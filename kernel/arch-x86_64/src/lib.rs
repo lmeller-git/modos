@@ -116,8 +116,8 @@ impl CpuDataCapability for X86_64 {
         my_cpu().cpu.is_bsp
     }
 
-    fn current_cpu() -> CpuId {
-        CpuId(my_cpu().cpu.logical_id)
+    fn my_cpu() -> BootCpu {
+        my_cpu().cpu
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {
@@ -139,14 +139,14 @@ struct CPUData {
 #[repr(C)]
 struct CPUStartupData {
     data: &'static mut CPUData,
-    entry: fn(BootCpu) -> !,
+    entry: fn() -> !,
     cs: ControlState,
     state: Arc<AtomicBool>,
     gate: Arc<AtomicBool>,
 }
 
 struct BSPReleaseData {
-    entry: fn(BootCpu) -> !,
+    entry: fn() -> !,
     comm: APBringupSync,
     my_cpu: &'static CPUData,
     boot_info: LateBootInfo,
@@ -248,11 +248,7 @@ fn build_core_stack(logical_id: usize) -> NonNull<u8> {
 impl SmpCapability for X86_64 {
     type InitToken = X86_64Init;
 
-    fn core_release(
-        _token: Self::InitToken,
-        boot_info: LateBootInfo,
-        entry: fn(BootCpu) -> !,
-    ) -> ! {
+    fn core_release(_token: Self::InitToken, boot_info: LateBootInfo, entry: fn() -> !) -> ! {
         // for each ap processor enumerated in boot_info do
         // allocate a stack for that core and set it up properly
         // allocate GDT and TSS for the core and initialize
@@ -275,12 +271,11 @@ impl SmpCapability for X86_64 {
         let comm = comm_init(&boot_info);
         let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
 
-        for (_i, (cpu, state)) in mp_info
+        for (cpu, state) in mp_info
             .cpus
             .iter()
             .filter(|core| !core.is_bsp)
             .zip(comm.cores.iter())
-            .enumerate()
         {
             let stack = build_core_stack(cpu.logical_id);
 
@@ -339,7 +334,7 @@ fn bsp_release(packet: &'static mut BSPReleaseData) -> ! {
     }
 }
 
-fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
+fn core_startup_trampoline(arg: usize) -> ! {
     assert_ne!(arg, 0);
     let my_packet = unsafe { &mut *(arg as *mut CPUStartupData) };
 
@@ -349,7 +344,7 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
         core::arch::asm!(
             "mov rsp, {top}", "xor ebp, ebp", "call {next}", "ud2",
             top = in(reg) my_packet.data.stack.as_ptr(),
-            next = sym ap_main, in("rdi") cpu, in("rsi") my_packet,
+            next = sym ap_main, in("rdi") my_packet,
             options(noreturn),
         );
     }
@@ -361,7 +356,7 @@ extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
     let BSPReleaseData {
         entry,
         comm,
-        my_cpu,
+        my_cpu: _,
         boot_info,
     } = *unsafe { Box::from_raw(packet as *mut BSPReleaseData) };
     for core in comm.cores.iter() {
@@ -388,10 +383,10 @@ extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
     comm.gate.store(true, Ordering::Release);
     drop(comm);
 
-    (entry)(my_cpu.cpu)
+    (entry)()
 }
 
-extern "C" fn ap_main(cpu: &BootCpu, my_packet: &'static mut CPUStartupData) -> ! {
+extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     let CPUStartupData {
         data,
         entry,
@@ -414,7 +409,7 @@ extern "C" fn ap_main(cpu: &BootCpu, my_packet: &'static mut CPUStartupData) -> 
     drop(state);
     drop(gate);
 
-    (entry)(*cpu)
+    (entry)()
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {

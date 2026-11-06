@@ -77,7 +77,7 @@ pub mod mp {
         pub is_bsp: bool,
     }
 
-    pub type CpuEntry = fn(&BootCpu, usize) -> !;
+    pub type CpuEntry = fn(usize) -> !;
 
     pub struct MpBootInfo {
         pub flags: u32,
