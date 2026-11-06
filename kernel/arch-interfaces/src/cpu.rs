@@ -35,6 +35,5 @@ pub trait CpuDataCapability {
 pub trait SmpCapability {
     type InitToken;
     /// Consumes the init phase. No more init after handoff into entry.
-    fn core_release(token: Self::InitToken, boot_info: &LateBootInfo, entry: fn(BootCpu) -> !)
-    -> !;
+    fn core_release(token: Self::InitToken, boot_info: LateBootInfo, entry: fn(BootCpu) -> !) -> !;
 }

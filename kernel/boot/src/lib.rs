@@ -40,6 +40,9 @@ pub struct LateBootInfo {
     pub mp_info: Option<MpBootInfo>,
 }
 
+unsafe impl Send for LateBootInfo {}
+unsafe impl Sync for LateBootInfo {}
+
 pub mod memmap {
     // Copyright © 2026, Julian Scheffers
     // SPDX-License-Identifier: MIT OR Apache-2.0

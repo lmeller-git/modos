@@ -28,7 +28,8 @@ use arch_interfaces::{
         TLBFlushCapability,
     },
 };
-use boot::{EarlyBootInfo, LateBootInfo, mp::BootCpu};
+use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
+use conquer_once::spin::OnceCell;
 use spin::{Mutex, lazy::Lazy};
 use uart_16550::SerialPort;
 use x86_64::{
@@ -148,6 +149,7 @@ struct BSPReleaseData {
     entry: fn(BootCpu) -> !,
     comm: APBringupSync,
     my_cpu: &'static CPUData,
+    boot_info: LateBootInfo,
 }
 
 #[derive(Clone, Debug)]
@@ -248,7 +250,7 @@ impl SmpCapability for X86_64 {
 
     fn core_release(
         _token: Self::InitToken,
-        boot_info: &LateBootInfo,
+        boot_info: LateBootInfo,
         entry: fn(BootCpu) -> !,
     ) -> ! {
         // for each ap processor enumerated in boot_info do
@@ -270,7 +272,7 @@ impl SmpCapability for X86_64 {
         serial_println!("cores: {}", mp_info.cpus.len());
 
         let cs = capture_cs();
-        let comm = comm_init(boot_info);
+        let comm = comm_init(&boot_info);
         let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
 
         for (_i, (cpu, state)) in mp_info
@@ -319,6 +321,7 @@ impl SmpCapability for X86_64 {
             entry,
             comm,
             my_cpu: bsp_cpu,
+            boot_info,
         }));
 
         bsp_release(packet)
@@ -352,11 +355,14 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     }
 }
 
+static BOOTDATA: OnceCell<LateBootInfo> = OnceCell::uninit();
+
 extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
     let BSPReleaseData {
         entry,
         comm,
         my_cpu,
+        boot_info,
     } = *unsafe { Box::from_raw(packet as *mut BSPReleaseData) };
     for core in comm.cores.iter() {
         while !core.load(Ordering::Acquire) {
@@ -365,6 +371,20 @@ extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
         }
     }
     // At this point we know that all cores including ours have done their init and are on their own stacks, ready for handoff
+
+    // we can reclaim bootloader memory now
+    if let Some(memmap) = boot_info.memmap.as_ref() {
+        let mut frame_alloc = frame::FRAME_ALLOC.get().unwrap().lock();
+        for region in memmap
+            .iter()
+            .filter(|region| region.type_ == MEMMAP_BOOTLOADER_RECLAIMABLE)
+        {
+            frame_alloc.add_region(region.base as usize, region.length as usize);
+        }
+    }
+
+    BOOTDATA.init_once(|| boot_info);
+
     comm.gate.store(true, Ordering::Release);
     drop(comm);
 

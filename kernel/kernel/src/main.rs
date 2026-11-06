@@ -33,7 +33,7 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::late_init(&init_once, &late_info).unwrap();
     serial_println!("Completed late init");
 
-    arch::TargetArch::core_release(init_once, &late_info, core_main)
+    arch::TargetArch::core_release(init_once, late_info, core_main)
 }
 
 fn core_main(cpu: BootCpu) -> ! {

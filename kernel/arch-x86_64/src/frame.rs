@@ -63,7 +63,7 @@ impl LinkedListFrameAllocator {
         let regions = unsafe { core::slice::from_raw_parts_mut(ptr, capacity) };
 
         let mut count = 0;
-        for e in memmap.iter().rev().filter(|e| e.type_ == MEMMAP_USABLE) {
+        for e in memmap.iter().rev().filter(is_usable) {
             let mut base = align_up(e.base, Size4KiB::SIZE) as usize;
             let end = align_down(e.base + e.length, Size4KiB::SIZE) as usize;
 
