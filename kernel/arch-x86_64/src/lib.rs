@@ -9,7 +9,7 @@ use core::{
     hint::spin_loop,
     mem::ManuallyDrop,
     ptr::{NonNull, null},
-    sync::atomic::{AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use arch_interfaces::{
@@ -34,7 +34,7 @@ use uart_16550::SerialPort;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
     registers::{
-        control::{Cr0, Cr3, Cr3Flags, Cr4, Cr4Flags},
+        control::{Cr0, Cr3, Cr4, Cr4Flags},
         model_specific::{GsBase, Msr},
     },
     structures::{
@@ -92,14 +92,6 @@ impl CpuDataCapability for X86_64 {
     }
 }
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CPUCoreState {
-    Init,
-    Ready,
-    Running,
-}
-
 #[repr(C)]
 struct CPUData {
     self_ptr: *const CPUData,
@@ -115,12 +107,20 @@ struct CPUStartupData {
     data: &'static mut CPUData,
     entry: fn(BootCpu) -> !,
     cs: ControlState,
-    state: Arc<AtomicU8>,
+    state: Arc<AtomicBool>,
+    gate: Arc<AtomicBool>,
+}
+
+struct BSPReleaseData {
+    entry: fn(BootCpu) -> !,
+    comm: APBringupSync,
+    my_cpu: &'static CPUData,
 }
 
 #[derive(Clone, Debug)]
 pub struct APBringupSync {
-    cores: Vec<Arc<AtomicU8>>,
+    cores: Vec<Arc<AtomicBool>>,
+    gate: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,29 +155,63 @@ unsafe fn apply_cs(s: &ControlState) {
 const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
 const AP_STACK_START: usize = 0xffff_f000_c000_0000;
 
-impl SmpCapability for X86_64 {
-    type Communicator = APBringupSync;
+fn comm_init(boot_info: &LateBootInfo) -> APBringupSync {
+    APBringupSync {
+        cores: boot_info
+            .mp_info
+            .as_ref()
+            .map(|mp_dat| {
+                mp_dat
+                    .cpus
+                    .iter()
+                    .filter_map(|cpu| (!cpu.is_bsp).then_some(Arc::new(AtomicBool::new(false))))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        gate: Arc::new(AtomicBool::new(false)),
+    }
+}
 
-    fn comm_init(boot_info: &LateBootInfo) -> Self::Communicator {
-        APBringupSync {
-            cores: boot_info
-                .mp_info
-                .as_ref()
-                .map(|mp_dat| {
-                    mp_dat
-                        .cpus
-                        .iter()
-                        .filter_map(|cpu| {
-                            (!cpu.is_bsp)
-                                .then_some(Arc::new(AtomicU8::new(CPUCoreState::Init as u8)))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
+fn build_core_stack(logical_id: usize) -> NonNull<u8> {
+    // allocate a stack
+    // one guard page between each stack
+    // layout is
+    // START_ADDRESS
+    // ....
+    // STACK_SIZE
+    // ....
+    // GUARD_PAGE
+    // NEXT
+    // ....
+    let our_base = AP_STACK_START + logical_id * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
+
+    let page_range = Page::<Size4KiB>::range(
+        Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
+        Page::containing_address(x86_64::VirtAddr::new((our_base + AP_STACK_SIZE) as u64)),
+    );
+
+    let mut frame_alloc = frame::get_frame_alloc().lock();
+    let mut pagetable = page::get_pagetable().lock();
+
+    for page in page_range {
+        let frame = frame_alloc.allocate_frame().unwrap();
+        unsafe {
+            pagetable.map_to(
+                page,
+                frame,
+                PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
+                &mut *frame_alloc,
+            )
         }
+        .unwrap()
+        .flush();
     }
 
-    fn ap_init(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !, comm: Self::Communicator) {
+    NonNull::new((our_base + AP_STACK_SIZE) as *mut _).unwrap()
+}
+
+impl SmpCapability for X86_64 {
+    fn core_release(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !) -> ! {
         // for each ap processor enumerated in boot_info do
         // allocate a stack for that core and set it up properly
         // allocate GDT and TSS for the core and initialize
@@ -191,12 +225,13 @@ impl SmpCapability for X86_64 {
         let Some(mp_info) = &boot_info.mp_info else {
             serial_println!("No smp");
             // TODO should return err such that we know that we are single core. Not fatal, but should be known
-            return;
+            todo!();
         };
 
         serial_println!("cores: {}", mp_info.cpus.len());
 
         let cs = capture_cs();
+        let comm = comm_init(boot_info);
 
         for (_i, (cpu, state)) in mp_info
             .cpus
@@ -205,47 +240,7 @@ impl SmpCapability for X86_64 {
             .zip(comm.cores.iter())
             .enumerate()
         {
-            // allocate a stack
-            // one guard page between each stack
-            // layout is
-            // START_ADDRESS
-            // ....
-            // STACK_SIZE
-            // ....
-            // GUARD_PAGE
-            // NEXT
-            // ....
-            let our_base =
-                AP_STACK_START + cpu.logical_id * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
-
-            let page_range = Page::<Size4KiB>::range(
-                Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
-                Page::containing_address(x86_64::VirtAddr::new((our_base + AP_STACK_SIZE) as u64)),
-            );
-
-            let mut frame_alloc = frame::get_frame_alloc().lock();
-            let mut pagetable = page::get_pagetable().lock();
-
-            for page in page_range {
-                let frame = frame_alloc.allocate_frame().unwrap();
-                unsafe {
-                    pagetable.map_to(
-                        page,
-                        frame,
-                        PageTableFlags::PRESENT
-                            | PageTableFlags::WRITABLE
-                            | PageTableFlags::NO_EXECUTE,
-                        &mut *frame_alloc,
-                    )
-                }
-                .unwrap()
-                .flush();
-            }
-
-            drop(frame_alloc);
-            drop(pagetable);
-
-            let stack = our_base + AP_STACK_SIZE;
+            let stack = build_core_stack(cpu.logical_id);
 
             let tss = build_tss(cpu.logical_id);
             let tss = Box::leak(Box::new(tss));
@@ -255,7 +250,7 @@ impl SmpCapability for X86_64 {
             let data = CPUData {
                 self_ptr: null(),
                 cpu: *cpu,
-                stack: ManuallyDrop::new(NonNull::new(stack as *mut u8).unwrap()),
+                stack: ManuallyDrop::new(stack),
                 gdt,
                 tss,
                 selectors,
@@ -268,6 +263,7 @@ impl SmpCapability for X86_64 {
                 entry,
                 cs,
                 state: state.clone(),
+                gate: comm.gate.clone(),
             }));
 
             (mp_info.start_cpu)(
@@ -276,24 +272,32 @@ impl SmpCapability for X86_64 {
                 my_packet as *mut CPUStartupData as usize,
             );
         }
+
+        let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
+        let packet = Box::leak(Box::new(BSPReleaseData {
+            entry,
+            comm,
+            my_cpu: bsp_cpu,
+        }));
+
+        bsp_release(packet)
     }
+}
 
-    fn ap_release(comm: Self::Communicator) {
-        for core in comm.cores.iter() {
-            while core.load(Ordering::Acquire) != CPUCoreState::Ready as u8 {
-                spin_loop();
-            }
-        }
-
-        for core in comm.cores {
-            core.store(CPUCoreState::Running as u8, Ordering::Release);
-        }
+fn bsp_release(packet: &'static mut BSPReleaseData) -> ! {
+    unsafe {
+        core::arch::asm!(
+            "mov rsp, {top}", "xor ebp, ebp", "call {next}", "ud2",
+            top = in(reg) packet.my_cpu.stack.as_ptr(),
+            next = sym bsp_main, in("rdi") packet,
+            options(noreturn),
+        );
     }
 }
 
 fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     assert_ne!(arg, 0);
-    let my_packet = unsafe { &*(arg as *const CPUStartupData) };
+    let my_packet = unsafe { &mut *(arg as *mut CPUStartupData) };
 
     unsafe {
         apply_cs(&my_packet.cs);
@@ -307,23 +311,49 @@ fn core_startup_trampoline(cpu: &BootCpu, arg: usize) -> ! {
     }
 }
 
-extern "C" fn ap_main(cpu: &BootCpu, my_packet: &'static CPUStartupData) -> ! {
-    load_gdt_tss(&my_packet.data.gdt, &my_packet.data.selectors);
+extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
+    let BSPReleaseData {
+        entry,
+        comm,
+        my_cpu,
+    } = *unsafe { Box::from_raw(packet as *mut BSPReleaseData) };
+    for core in comm.cores.iter() {
+        while !core.load(Ordering::Acquire) {
+            // TODO: bounded wait per core and one second pass, then note which cores never came up
+            spin_loop();
+        }
+    }
+    // At this point we know that all cores including ours have done their init and are on their own stacks, ready for handoff
+    comm.gate.store(true, Ordering::Release);
+    drop(comm);
+
+    (entry)(my_cpu.cpu)
+}
+
+extern "C" fn ap_main(cpu: &BootCpu, my_packet: &'static mut CPUStartupData) -> ! {
+    let CPUStartupData {
+        data,
+        entry,
+        cs: _,
+        state,
+        gate,
+    } = *unsafe { Box::from_raw(my_packet as *mut CPUStartupData) };
+    load_gdt_tss(&data.gdt, &data.selectors);
 
     idt::IDT.get().unwrap().load();
 
-    let my_data_ptr = x86_64::VirtAddr::from_ptr(my_packet.data as *const CPUData);
+    let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);
     GsBase::write(my_data_ptr);
 
-    my_packet
-        .state
-        .store(CPUCoreState::Ready as u8, Ordering::Release);
-
-    while my_packet.state.load(Ordering::Acquire) != CPUCoreState::Running as u8 {
+    state.store(true, Ordering::Release);
+    while !gate.load(Ordering::Acquire) {
         spin_loop();
     }
 
-    (my_packet.entry)(*cpu)
+    drop(state);
+    drop(gate);
+
+    (entry)(*cpu)
 }
 
 impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
@@ -487,6 +517,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
             is_bsp: true,
         });
 
+    let bsp_stack = build_core_stack(my_cpu.logical_id);
     let tss = build_tss(my_cpu.logical_id);
     let tss = Box::leak(Box::new(tss));
     let (gdt, selectors) = build_gdt(tss);
@@ -494,7 +525,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
     let my_data = CPUData {
         self_ptr: null(),
         cpu: *my_cpu,
-        stack: ManuallyDrop::new(NonNull::dangling()), // TODO switch stack?
+        stack: ManuallyDrop::new(bsp_stack),
         gdt,
         selectors,
         tss,

@@ -25,20 +25,19 @@ unsafe extern "C" fn _start() -> ! {
     let late_info = boot_info.into_late();
     arch::TargetArch::late_init(&late_info).unwrap();
     serial_println!("Completed late init");
-    let comm = arch::TargetArch::comm_init(&late_info);
-    arch::TargetArch::ap_init(&late_info, core_main, comm.clone());
-    arch::TargetArch::ap_release(comm);
-
-    for _ in 0..10000 {
-        spin_loop();
-    }
-
-    TargetPlatform::shutdown(ExitCode::Success)
+    arch::TargetArch::core_release(&late_info, core_main)
 }
 
 fn core_main(cpu: BootCpu) -> ! {
     serial_println!("Hello from cpu {:?}", cpu);
-    loop {
+    if cpu.is_bsp {
+        // TODO
+        // cleanup
+    }
+
+    for _ in 0..1000000 {
         spin_loop();
     }
+
+    TargetPlatform::shutdown(ExitCode::Success)
 }
