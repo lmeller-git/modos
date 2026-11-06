@@ -18,14 +18,22 @@ use platform::{
 unsafe extern "C" fn _start() -> ! {
     let boot_info = boot::build_bootinfo();
     serial_println!("Hello there!");
-    arch::TargetArch::early_init(&boot_info).unwrap();
+
+    let init_once = arch::TargetArch::initialize().unwrap();
+
+    arch::TargetArch::early_init(&init_once, &boot_info).unwrap();
+
     early_heap::init();
+
     let string = String::from_str("Hello world");
     serial_println!("We allocated this on the heap: {:?}", string);
+
     let late_info = boot_info.into_late();
-    arch::TargetArch::late_init(&late_info).unwrap();
+
+    arch::TargetArch::late_init(&init_once, &late_info).unwrap();
     serial_println!("Completed late init");
-    arch::TargetArch::core_release(&late_info, core_main)
+
+    arch::TargetArch::core_release(init_once, &late_info, core_main)
 }
 
 fn core_main(cpu: BootCpu) -> ! {

@@ -23,7 +23,9 @@ pub enum InitErrorKind {
 }
 
 pub trait InitCapability {
-    fn early_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), InitError>;
+    type InitToken;
+    fn initialize() -> Option<Self::InitToken>;
+    fn early_init(token: &Self::InitToken, boot_info: &EarlyBootInfo<'_>) -> Result<(), InitError>;
 
-    fn late_init(boot_info: &LateBootInfo) -> Result<(), InitError>;
+    fn late_init(token: &Self::InitToken, boot_info: &LateBootInfo) -> Result<(), InitError>;
 }

@@ -13,7 +13,7 @@ use core::{
 };
 
 use arch_interfaces::{
-    cpu::{CpuDataCapability, SmpCapability},
+    cpu::{CpuDataCapability, CpuId, SmpCapability},
     init::InitCapability,
     interrupt::InterruptHandlingCapability,
     mm::{
@@ -71,24 +71,56 @@ mod qemu;
 /// Capability provider for x86_64 targets
 pub struct X86_64;
 
+pub struct X86_64Init(());
+
 impl InitCapability for X86_64 {
-    fn early_init(boot_info: &EarlyBootInfo<'_>) -> Result<(), arch_interfaces::init::InitError> {
+    type InitToken = X86_64Init;
+
+    fn initialize() -> Option<Self::InitToken> {
+        static SINGLETON: AtomicBool = AtomicBool::new(false);
+        if SINGLETON.swap(true, Ordering::Release) {
+            None
+        } else {
+            Some(X86_64Init(()))
+        }
+    }
+
+    fn early_init(
+        _token: &Self::InitToken,
+        boot_info: &EarlyBootInfo<'_>,
+    ) -> Result<(), arch_interfaces::init::InitError> {
         early_init(boot_info);
         Ok(())
     }
 
-    fn late_init(boot_info: &LateBootInfo) -> Result<(), arch_interfaces::init::InitError> {
+    fn late_init(
+        _token: &Self::InitToken,
+        boot_info: &LateBootInfo,
+    ) -> Result<(), arch_interfaces::init::InitError> {
         late_init(boot_info);
         Ok(())
     }
 }
 
+fn my_cpu() -> &'static CPUData {
+    unsafe { &*GsBase::read().as_ptr() }
+}
+
 impl CpuDataCapability for X86_64 {
-    fn core_init(
-        _boot_info: &LateBootInfo,
-        _core_id: usize,
-    ) -> Option<arch_interfaces::cpu::CpuId> {
-        None
+    fn cpu_count() -> usize {
+        my_cpu().cpus.len()
+    }
+
+    fn is_bootstrap_cpu() -> bool {
+        my_cpu().cpu.is_bsp
+    }
+
+    fn current_cpu() -> CpuId {
+        CpuId(my_cpu().cpu.logical_id)
+    }
+
+    fn cpus() -> impl Iterator<Item = CpuId> {
+        my_cpu().cpus.iter().copied()
     }
 }
 
@@ -100,6 +132,7 @@ struct CPUData {
     gdt: GlobalDescriptorTable,
     selectors: Selectors,
     tss: &'static TaskStateSegment,
+    cpus: &'static [CpuId],
 }
 
 #[repr(C)]
@@ -211,7 +244,13 @@ fn build_core_stack(logical_id: usize) -> NonNull<u8> {
 }
 
 impl SmpCapability for X86_64 {
-    fn core_release(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !) -> ! {
+    type InitToken = X86_64Init;
+
+    fn core_release(
+        _token: Self::InitToken,
+        boot_info: &LateBootInfo,
+        entry: fn(BootCpu) -> !,
+    ) -> ! {
         // for each ap processor enumerated in boot_info do
         // allocate a stack for that core and set it up properly
         // allocate GDT and TSS for the core and initialize
@@ -232,6 +271,7 @@ impl SmpCapability for X86_64 {
 
         let cs = capture_cs();
         let comm = comm_init(boot_info);
+        let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
 
         for (_i, (cpu, state)) in mp_info
             .cpus
@@ -254,7 +294,9 @@ impl SmpCapability for X86_64 {
                 gdt,
                 tss,
                 selectors,
+                cpus: bsp_cpu.cpus,
             };
+
             let data = Box::leak(Box::new(data));
             data.self_ptr = data as *const CPUData;
 
@@ -273,7 +315,6 @@ impl SmpCapability for X86_64 {
             );
         }
 
-        let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
         let packet = Box::leak(Box::new(BSPReleaseData {
             entry,
             comm,
@@ -513,9 +554,22 @@ pub fn late_init(boot_info: &LateBootInfo) {
         .flatten()
         .unwrap_or(&BootCpu {
             logical_id: 0,
-            hw_id: 0,
+            hw_id: 0, // TODO
             is_bsp: true,
         });
+
+    let cpus = Box::leak(
+        boot_info
+            .mp_info
+            .as_ref()
+            .map(|info| {
+                info.cpus
+                    .iter()
+                    .map(|cpu| CpuId(cpu.logical_id))
+                    .collect::<Box<_>>()
+            })
+            .unwrap_or([CpuId(0)].into()),
+    );
 
     let bsp_stack = build_core_stack(my_cpu.logical_id);
     let tss = build_tss(my_cpu.logical_id);
@@ -529,6 +583,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
         gdt,
         selectors,
         tss,
+        cpus,
     };
 
     let my_data = Box::leak(Box::new(my_data));

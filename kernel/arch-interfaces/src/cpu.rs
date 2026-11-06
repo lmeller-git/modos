@@ -17,36 +17,24 @@ use derive_more::{Binary, Display, LowerHex, Octal, UpperHex};
     UpperHex,
 )]
 #[repr(transparent)]
-pub struct CpuId(u32);
+pub struct CpuId(pub usize);
 
 impl CpuId {
-    pub fn value(&self) -> u32 {
+    pub fn value(&self) -> usize {
         self.0
     }
 }
 
 pub trait CpuDataCapability {
-    fn cpu_count() -> u32 {
-        1
-    }
-
-    fn core_init(_boot_info: &LateBootInfo, _core_id: usize) -> Option<CpuId> {
-        None
-    }
-
-    fn is_bootstrap_cpu() -> bool {
-        true
-    }
-
-    fn current_cpu() -> CpuId {
-        CpuId(0)
-    }
-
-    fn cpus() -> impl Iterator<Item = CpuId> {
-        core::iter::once(Self::current_cpu())
-    }
+    fn cpu_count() -> usize;
+    fn is_bootstrap_cpu() -> bool;
+    fn current_cpu() -> CpuId;
+    fn cpus() -> impl Iterator<Item = CpuId>;
 }
 
 pub trait SmpCapability {
-    fn core_release(boot_info: &LateBootInfo, entry: fn(BootCpu) -> !) -> !;
+    type InitToken;
+    /// Consumes the init phase. No more init after handoff into entry.
+    fn core_release(token: Self::InitToken, boot_info: &LateBootInfo, entry: fn(BootCpu) -> !)
+    -> !;
 }
