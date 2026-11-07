@@ -23,7 +23,7 @@ jobs:
         with:
           submodules: true
       - name: Install nightly
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch=master
         with:
           toolchain: nightly
       - run: |
@@ -47,6 +47,7 @@ jobs:
         env:
           #HOST_TEST_PKGS: "early_heap executor instrument memory irq"
           RUSTFLAGS: "-Z sanitizer=address"
+          CARGO_TARGET_APPLIES_TO_HOST: "false"
           ASAN_OPTIONS: "detect_odr_violation=0:detect_leaks=0"
         # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
       - name: make test-host -Zsanitizer=leak
@@ -55,6 +56,7 @@ jobs:
         env:
           #HOST_TEST_PKGS: "early_heap executor instrument memory irq"
           LSAN_OPTIONS: "suppressions=lsan-suppressions.txt"
+          CARGO_TARGET_APPLIES_TO_HOST: "false"
           RUSTFLAGS: "-Z sanitizer=leak"
   miri:
     runs-on: ubuntu-latest
@@ -65,7 +67,7 @@ jobs:
       - run: |
           echo "NIGHTLY=nightly-$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)" >> "$GITHUB_ENV"
       - name: Install ${{ env.NIGHTLY }}
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch=master
         with:
           toolchain: ${{ env.NIGHTLY }}
           components: miri
@@ -85,7 +87,7 @@ jobs:
         with:
           submodules: true
       - name: Install stable
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch=master
         with:
           toolchain: stable
       - name: cargo test loom
@@ -101,7 +103,7 @@ jobs:
         with:
           submodules: true
       - name: Install stable
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # branch=master
         with:
           toolchain: stable
       - name: cargo test shuttle
