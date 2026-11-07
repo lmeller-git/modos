@@ -9,10 +9,10 @@ use platform_interfaces::{
 use spin::{Lazy, Mutex};
 use uart_16550::SerialPort;
 
-pub struct PcQemu;
+pub struct PcX86_64;
 
 #[cfg(feature = "qemu-platform")]
-impl ShutdownCapability for PcQemu {
+impl ShutdownCapability for PcX86_64 {
     fn shutdown(code: ExitCode) -> ! {
         unsafe {
             use x86_64::instructions::port::Port;
@@ -31,7 +31,18 @@ impl ShutdownCapability for PcQemu {
     }
 }
 
-impl SerialWriterCapability for PcQemu {
+#[cfg(not(feature = "qemu-platform"))]
+impl ShutdownCapability for PcX86_64 {
+    fn shutdown(_: ExitCode) -> ! {
+        todo!()
+    }
+
+    fn restart() -> ! {
+        todo!()
+    }
+}
+
+impl SerialWriterCapability for PcX86_64 {
     fn write_str(msg: &str) -> Result<(), SerialWriteError> {
         SERIAL
             .lock()
