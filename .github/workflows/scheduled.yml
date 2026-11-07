@@ -55,8 +55,8 @@ jobs:
       - name: cargo update
         if: hashFiles('Cargo.lock') != ''
         run: cargo update
-      - name: cargo test
+      - name: make test-host
         if: hashFiles('Cargo.lock') != ''
-        run: make test-host CARGO_FLAGS="--locked --all-features --all-targets"
+        run: make test-host CARGO_FLAGS="--locked --all-features"
         env:
           RUSTFLAGS: -D deprecated

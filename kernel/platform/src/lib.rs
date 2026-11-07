@@ -2,12 +2,12 @@
 
 pub use platform_interfaces as interface;
 use platform_interfaces::{power::ShutdownCapability, serial::SerialWriterCapability};
-#[cfg(feature = "platform-pc-x86_64")]
-use platform_pc_x86_64::PcQemu;
+#[cfg(target_arch = "x86_64")]
+use platform_pc_x86_64::PcX86_64;
 
-#[cfg(feature = "platform-pc-x86_64")]
-pub type TargetPlatform = PcQemu;
-#[cfg(not(feature = "platform-pc-x86_64"))]
+#[cfg(target_arch = "x86_64")]
+pub type TargetPlatform = PcX86_64;
+#[cfg(not(target_arch = "x86_64"))]
 pub struct TargetPlatform;
 
 pub trait SupportedPlatform: ShutdownCapability + SerialWriterCapability {}

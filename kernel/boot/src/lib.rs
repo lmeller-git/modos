@@ -84,10 +84,14 @@ pub mod mp {
 
 pub fn build_bootinfo<'a>() -> EarlyBootInfo<'a> {
     #[cfg(feature = "limine")]
-    limine::build_early_bootinfo()
+    return limine::build_early_bootinfo();
+    #[cfg(not(feature = "limine"))]
+    todo!()
 }
 
 fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInfo {
     #[cfg(feature = "limine")]
-    limine::build_late_bootinfo(early_boot)
+    return limine::build_late_bootinfo(early_boot);
+    #[cfg(not(feature = "limine"))]
+    todo!()
 }

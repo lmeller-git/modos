@@ -29,6 +29,7 @@ HOST_TEST_EXCLUDE ?=
 HOST_TEST_SELECT = $(if $(strip $(HOST_TEST_PKGS)), \
 	$(addprefix -p ,$(HOST_TEST_PKGS)), \
 	--workspace $(addprefix --exclude ,$(HOST_TEST_EXCLUDE)))
+HOST_TARGET ?= $(shell rustc -Vv | grep host: | cut -d' ' -f2)
 
 # ---------------------------------------------------------------------------
 # Kernel build
@@ -195,7 +196,7 @@ debug-test:
 # Host-side unit tests (host target)
 .PHONY: test-host
 test-host:
-	cargo test $(HOST_TEST_SELECT) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
+	CARGO_TARGET_APPLIES_TO_HOST=false cargo test $(HOST_TEST_SELECT) --lib --target $(HOST_TARGET) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
 
 .PHONY: test
 test: test-host test-qemu

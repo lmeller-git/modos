@@ -11,12 +11,12 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["platform-pc-x86_64"]
-platform-pc-x86_64 = ["dep:platform-pc-x86_64"]
 
 [dependencies]
 platform-interfaces = { path = "../platform-interfaces" }
-platform-pc-x86_64 = { path = "../platform-pc-x86_64", optional = true }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+platform-pc-x86_64 = { path = "../platform-pc-x86_64" }
 
 [lints]
 workspace = true
