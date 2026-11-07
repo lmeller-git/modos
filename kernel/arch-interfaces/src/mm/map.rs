@@ -211,6 +211,8 @@ pub enum PageTableErrorKind {
 pub trait MemMapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
     TLBFlushCapability
 {
+    /// # Safety
+    /// The caller needs to ensure that the frame we are mapping the virtual memory onto is not currently used.
     unsafe fn map_to(
         page: VirtMemoryFrame<FRAME_SIZE>,
         frame: PhysMemoryFrame<FRAME_SIZE>,
@@ -218,6 +220,8 @@ pub trait MemMapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
         frame_allocator: &mut impl FrameAllocator<FRAME_SIZE>,
     ) -> Result<Self::Flush, PageTableError>;
 
+    /// # Safety
+    /// The caller needs to ensure that the frame we are mapping the virtual memory onto is not currently used.
     unsafe fn map_to_global(
         page: VirtMemoryFrame<FRAME_SIZE>,
         frame: PhysMemoryFrame<FRAME_SIZE>,
@@ -234,7 +238,13 @@ pub trait MemUnmapperCapability<const FRAME_SIZE: usize = FRAME_4KIB_SIZE>:
     ) -> Result<(PhysMemoryFrame<FRAME_SIZE>, Self::Flush), PageTableError>;
 }
 
+#[derive(Debug, thiserror::Error, PartialEq, PartialOrd, Clone)]
+pub enum FlushError {
+    #[error("Unknown flush eror: {}", msg)]
+    Unknonw { msg: &'static str },
+}
+
 pub trait TLBFlushCapability {
     type Flush;
-    fn flush(flush: Self::Flush) -> Result<(), ()>;
+    fn flush(flush: Self::Flush) -> Result<(), FlushError>;
 }

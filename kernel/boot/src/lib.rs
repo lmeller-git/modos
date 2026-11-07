@@ -26,10 +26,6 @@ impl<'a> EarlyBootInfo<'a> {
     pub fn into_late(&self) -> LateBootInfo {
         build_late_bootinfo(self)
     }
-
-    pub unsafe fn release(self) {
-        todo!()
-    }
 }
 
 pub struct LateBootInfo {

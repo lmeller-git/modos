@@ -17,7 +17,9 @@ use arch_interfaces::{
     init::InitCapability,
     interrupt::InterruptHandlingCapability,
     mm::{
+        FlushError,
         FrameAllocatorCapability,
+        FrameDeallocationError,
         FrameDeallocatorCapability,
         MemMapperCapability,
         MemUnmapperCapability,
@@ -30,8 +32,7 @@ use arch_interfaces::{
 };
 use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
 use conquer_once::spin::OnceCell;
-use spin::{Mutex, lazy::Lazy};
-use uart_16550::SerialPort;
+use platform::interface::serial::SerialWriterCapability;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
     registers::{
@@ -424,13 +425,15 @@ impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
 }
 
 impl FrameDeallocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
-    unsafe fn deallocate(frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>) -> Result<(), ()> {
+    unsafe fn deallocate(
+        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+    ) -> Result<(), FrameDeallocationError> {
         unsafe {
             frame::get_frame_alloc().lock().deallocate_frame(
                 PhysFrame::<Size4KiB>::from_start_address(x86_64::PhysAddr::new(
                     frame.start().as_usize() as u64,
                 ))
-                .map_err(|_| {})?,
+                .map_err(|_| FrameDeallocationError::InvalidFrame)?,
             );
         };
         Ok(())
@@ -520,7 +523,7 @@ impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
 impl TLBFlushCapability for X86_64 {
     type Flush = MapperFlush<Size4KiB>;
 
-    fn flush(flush: Self::Flush) -> Result<(), ()> {
+    fn flush(flush: Self::Flush) -> Result<(), FlushError> {
         flush.flush();
         Ok(())
     }
@@ -539,12 +542,6 @@ impl InterruptHandlingCapability for X86_64 {
         without_interrupts(f)
     }
 }
-
-static SERIAL: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
-    let mut port = unsafe { SerialPort::new(0x3F8) };
-    port.init();
-    port.into()
-});
 
 pub fn exit(code: usize) -> ! {
     qemu::exit_qemu(qemu::QemuExitCode::from_usize(code));
@@ -622,12 +619,8 @@ fn init_xmm() {
     }
 }
 
-pub fn _serial_print(args: Arguments<'_>) {
-    use core::fmt::Write;
-    SERIAL
-        .lock()
-        .write_fmt(args)
-        .expect("Printing to serial failed");
+fn _serial_print(args: Arguments<'_>) {
+    platform::TargetPlatform::write_fmt(args).unwrap();
 }
 
 #[macro_export]

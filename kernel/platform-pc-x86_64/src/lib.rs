@@ -4,7 +4,7 @@ use core::fmt::Write;
 
 use platform_interfaces::{
     power::{ExitCode, ShutdownCapability},
-    serial::SerialWriterCapability,
+    serial::{SerialWriteError, SerialWriterCapability},
 };
 use spin::{Lazy, Mutex};
 use uart_16550::SerialPort;
@@ -32,12 +32,18 @@ impl ShutdownCapability for PcQemu {
 }
 
 impl SerialWriterCapability for PcQemu {
-    fn write_str(msg: &str) -> Result<(), ()> {
-        SERIAL.lock().write_str(msg).map_err(|_| {})
+    fn write_str(msg: &str) -> Result<(), SerialWriteError> {
+        SERIAL
+            .lock()
+            .write_str(msg)
+            .map_err(|_| SerialWriteError::Unknown { msg: "unknown" })
     }
 
-    fn write_fmt(args: core::fmt::Arguments<'_>) -> Result<(), ()> {
-        SERIAL.lock().write_fmt(args).map_err(|_| {})
+    fn write_fmt(args: core::fmt::Arguments<'_>) -> Result<(), SerialWriteError> {
+        SERIAL
+            .lock()
+            .write_fmt(args)
+            .map_err(|_| SerialWriteError::Unknown { msg: "unknown" })
     }
 }
 

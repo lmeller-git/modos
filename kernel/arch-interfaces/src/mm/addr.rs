@@ -42,11 +42,11 @@ impl VirtAddr {
     }
 
     pub fn align_up(&mut self, align: usize) {
-        self.0 = align_up(self.0, align)
+        self.0 = align_up(self.0, align);
     }
 
     pub fn align_down(&mut self, align: usize) {
-        self.0 = align_down(self.0, align)
+        self.0 = align_down(self.0, align);
     }
 }
 
@@ -98,11 +98,11 @@ impl PhysAddr {
     }
 
     pub fn align_up(&mut self, align: usize) {
-        self.0 = align_up(self.0, align)
+        self.0 = align_up(self.0, align);
     }
 
     pub fn align_down(&mut self, align: usize) {
-        self.0 = align_down(self.0, align)
+        self.0 = align_down(self.0, align);
     }
 }
 

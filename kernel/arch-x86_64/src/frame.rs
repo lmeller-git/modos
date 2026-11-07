@@ -1,6 +1,6 @@
 use core::ptr::null_mut;
 
-use arch_interfaces::mm::PhysMemoryFrame;
+use arch_interfaces::mm::{FrameDeallocationError, PhysMemoryFrame};
 use boot::memmap::{Entry, MEMMAP_BOOTLOADER_RECLAIMABLE, MEMMAP_USABLE};
 use conquer_once::spin::OnceCell;
 use spin::Mutex;
@@ -195,11 +195,11 @@ where
     unsafe fn deallocate(
         &mut self,
         frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<(), ()> {
+    ) -> Result<(), FrameDeallocationError> {
         unsafe {
             self.0.deallocate_frame(
                 PhysFrame::from_start_address(PhysAddr::new(frame.start().as_usize() as u64))
-                    .map_err(|_| {})?,
+                    .map_err(|_| FrameDeallocationError::InvalidFrame)?,
             );
         }
         Ok(())

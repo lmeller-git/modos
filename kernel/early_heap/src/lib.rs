@@ -38,6 +38,9 @@ pub mod linked_list {
             }
         }
 
+        /// # Safety
+        /// `heap_bottom` needs to be a valid ptr pointing to unused and mapped virtual memory.
+        /// heap size needs to be a valid size of unused memory, that is contiguous mapped free memory after `heap_bottom`.
         pub unsafe fn init(&self, heap_bottom: *mut u8, heap_size: usize) {
             unsafe {
                 self.inner.lock().init(heap_bottom, heap_size);

@@ -45,7 +45,6 @@ dependencies = [
  "platform",
  "raw-cpuid 11.6.0",
  "spin",
- "uart_16550",
  "x2apic",
  "x86_64",
 ]
@@ -220,6 +219,9 @@ dependencies = [
 [[package]]
 name = "platform-interfaces"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "platform-pc-x86_64"
