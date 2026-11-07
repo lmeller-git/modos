@@ -59,7 +59,7 @@ impl LinkedListFrameAllocator {
 
         assert_eq!(host.base, align_up(host.base, Size4KiB::SIZE));
         let ptr = (hhdm_offset + host.base as usize) as *mut Region;
-        unsafe { core::ptr::write_bytes(ptr as *mut u8, 0, table_bytes) };
+        unsafe { core::ptr::write_bytes(ptr.cast::<u8>(), 0, table_bytes) };
         let regions = unsafe { core::slice::from_raw_parts_mut(ptr, capacity) };
 
         let mut count = 0;

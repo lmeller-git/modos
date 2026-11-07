@@ -560,13 +560,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
     let my_cpu = boot_info
         .mp_info
         .as_ref()
-        .map(|info| {
-            info.cpus
-                .iter()
-                .find(|cpu| cpu.is_bsp)
-                .and_then(|cpu| Some(cpu))
-        })
-        .flatten()
+        .and_then(|info| info.cpus.iter().find(|cpu| cpu.is_bsp))
         .unwrap_or(&BootCpu {
             logical_id: 0,
             hw_id: 0, // TODO
@@ -580,10 +574,10 @@ pub fn late_init(boot_info: &LateBootInfo) {
             .map(|info| {
                 info.cpus
                     .iter()
-                    .map(|cpu| CpuId(cpu.logical_id))
+                    .map(|cpu| CpuId::new(cpu.logical_id))
                     .collect::<Box<_>>()
             })
-            .unwrap_or([CpuId(0)].into()),
+            .unwrap_or([CpuId::new(0)].into()),
     );
 
     let bsp_stack = build_core_stack(my_cpu.logical_id);

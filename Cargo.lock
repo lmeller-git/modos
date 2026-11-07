@@ -42,6 +42,7 @@ dependencies = [
  "arch-interfaces",
  "boot",
  "conquer-once",
+ "platform",
  "raw-cpuid 11.6.0",
  "spin",
  "uart_16550",

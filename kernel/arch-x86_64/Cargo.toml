@@ -16,6 +16,7 @@ acpi = { version = "5.2.0", features = ["alloc"] }
 conquer-once = { workspace = true }
 arch-interfaces = { path = "../arch-interfaces" }
 x2apic = { workspace = true }
+platform = { path = "../platform" }
 
 [lints]
 workspace = true
