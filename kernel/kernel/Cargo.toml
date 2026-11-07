@@ -10,6 +10,10 @@ keywords.workspace = true
 categories.workspace = true
 description.workspace = true
 
+[[bin]]
+name = "kernel"
+test = false
+
 [dependencies]
 boot = { path = "../boot" }
 arch = { path = "../arch" }

@@ -4,6 +4,8 @@
 extern crate alloc;
 
 use alloc::string::String;
+#[cfg(not(test))]
+use core::panic::PanicInfo;
 use core::{hint::spin_loop, str::FromStr};
 
 use arch::interface::{
@@ -25,7 +27,7 @@ unsafe extern "C" fn _start() -> ! {
 
     arch::TargetArch::early_init(&init_once, &boot_info).unwrap();
 
-    early_heap::init();
+    early_heap::init(&GLOBAL_ALLOCATOR);
 
     let string = String::from_str("Hello world");
     serial_println!("We allocated this on the heap: {:?}", string);
@@ -48,3 +50,14 @@ fn core_main() -> ! {
 
     TargetPlatform::shutdown(ExitCode::Success)
 }
+
+#[cfg(not(test))]
+#[panic_handler]
+fn kernel_panic(info: &PanicInfo<'_>) -> ! {
+    serial_println!("Panic: {:?}", info);
+    TargetPlatform::shutdown(ExitCode::Failure)
+}
+
+#[global_allocator]
+pub static GLOBAL_ALLOCATOR: early_heap::linked_list::SafeHeap =
+    early_heap::linked_list::get_alloc();

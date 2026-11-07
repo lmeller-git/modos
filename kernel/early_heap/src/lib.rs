@@ -11,8 +11,7 @@ use arch::{
     },
 };
 
-#[global_allocator]
-pub static GLOBAL_ALLOCATOR: linked_list::SafeHeap = linked_list::get_alloc();
+use crate::linked_list::SafeHeap;
 
 pub mod linked_list {
     use core::{
@@ -23,7 +22,7 @@ pub mod linked_list {
     use linked_list_allocator::Heap;
     use spin::{Mutex, MutexGuard};
 
-    pub(super) const fn get_alloc() -> SafeHeap {
+    pub const fn get_alloc() -> SafeHeap {
         SafeHeap::new()
     }
 
@@ -77,7 +76,7 @@ pub mod linked_list {
 pub const HEAP_START: usize = 0x_7444_4444_0000;
 pub const HEAP_SIZE: usize = 10000 * 1024; // 10 MiB
 
-pub fn init() {
+pub fn init(alloc: &SafeHeap) {
     let page_range = {
         let heap_start = VirtAddr::new(HEAP_START);
         let heap_end = heap_start + HEAP_SIZE;
@@ -93,7 +92,7 @@ pub fn init() {
             .unwrap()
             .flush();
     }
-    unsafe { GLOBAL_ALLOCATOR.init(HEAP_START as *mut u8, HEAP_SIZE) };
+    unsafe { alloc.init(HEAP_START as *mut u8, HEAP_SIZE) };
 }
 
 pub fn add(left: u64, right: u64) -> u64 {

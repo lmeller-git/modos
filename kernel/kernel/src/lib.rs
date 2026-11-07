@@ -1,11 +1,7 @@
 #![no_std]
 
 use core::fmt::Arguments;
-#[cfg(not(test))]
-use core::panic::PanicInfo;
 
-#[cfg(not(test))]
-use platform::interface::power::{ExitCode, ShutdownCapability};
 use platform::{TargetPlatform, interface::serial::SerialWriterCapability};
 
 #[macro_export]
@@ -27,13 +23,6 @@ macro_rules! serial_print {
 
 pub fn _serial_print(args: Arguments<'_>) {
     TargetPlatform::write_fmt(args).unwrap();
-}
-
-#[cfg(not(test))]
-#[panic_handler]
-fn kernel_panic(info: &PanicInfo<'_>) -> ! {
-    serial_println!("Panic: {:?}", info);
-    TargetPlatform::shutdown(ExitCode::Failure)
 }
 
 pub fn add(left: u64, right: u64) -> u64 {

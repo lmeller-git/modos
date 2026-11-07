@@ -21,7 +21,14 @@ LIMINE_BRANCH    ?= v11.x-binary
 # Set KVM=1 for anything performance related
 KVM ?=
 
+# Set host test pkgs to run only those
 HOST_TEST_PKGS ?=
+# by default all pkgs are tested
+HOST_TEST_EXCLUDE ?=
+
+HOST_TEST_SELECT = $(if $(strip $(HOST_TEST_PKGS)), \
+	$(addprefix -p ,$(HOST_TEST_PKGS)), \
+	--workspace $(addprefix --exclude ,$(HOST_TEST_EXCLUDE)))
 
 # ---------------------------------------------------------------------------
 # Kernel build
@@ -82,6 +89,8 @@ help:
 	@echo "  clean        Remove cargo build directory and ISO artifacts"
 	@echo "  distclean    Remove build directory and downloaded limine/ovmf files"
 	@echo "  help         Show this usage text"
+	@echo "  doc          Run docs-rs for the kernel package"
+	@echo "  hack         Type-check feature combinations using cargo-hack"
 	@echo ""
 	@echo "User Variables / Flags:"
 	@echo "  RUST_PROFILE      Cargo profile [dev|release] (default: dev)"
@@ -92,7 +101,8 @@ help:
 	@echo "  QEMUFLAGS         Custom flags passed to qemu-system-x86_64"
 	@echo "  QEMU_WRAPPER      Wrapper script for QEMU (default: ./scripts/run_qemu.sh)"
 	@echo "  LIMINE_BRANCH     Limine repository branch (default: v11.x-binary)"
-	@echo "  HOST_TEST_PKGS    Space-separated list of cargo packages for host testing"
+	@echo "  HOST_TEST_PKGS     Only host-test these packages (default: whole workspace)"
+	@echo "  HOST_TEST_EXCLUDE  Packages to skip in host tests (e.g. wasm apps)"
 
 .PHONY: all
 all: $(ISO)
@@ -115,6 +125,14 @@ check:
 .PHONY: clippy
 clippy:
 	$(KERNEL_ENV) cargo clippy $(KERNEL_ARGS)
+
+.PHONY: doc
+doc:
+	$(KERNEL_ENV) cargo doc -p $(KERNEL_PKG) --no-deps $(KERNEL_ARGS)
+
+.PHONY: hack
+hack:
+	$(KERNEL_ENV) cargo hack --feature-powerset check $(KERNEL_ARGS)
 
 # UEFI-only bootable ISO.
 $(ISO): $(KERNEL_ELF) limine.conf $(LIMINE_DIR)/BOOTX64.EFI
@@ -177,11 +195,7 @@ debug-test:
 # Host-side unit tests (host target)
 .PHONY: test-host
 test-host:
-ifeq ($(strip $(HOST_TEST_PKGS)),)
-	@echo "HOST_TEST_PKGS is empty, nothing to test on the host"
-else
-	cargo test $(addprefix -p ,$(HOST_TEST_PKGS)) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
-endif
+	cargo test $(HOST_TEST_SELECT) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
 
 .PHONY: test
 test: test-host test-qemu
