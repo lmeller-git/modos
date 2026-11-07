@@ -64,6 +64,36 @@ endif
 # Targets
 # ---------------------------------------------------------------------------
 
+.PHONY: help
+help:
+	@echo "Usage: make [target] [VARIABLE=value ...]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all          Build the bootable ISO (default target)"
+	@echo "  kernel       Compile the kernel ELF binary via cargo"
+	@echo "  check        Type-check / lint workspace targets for kernel target"
+	@echo "  clippy       Run clippy linter for kernel target"
+	@echo "  run          Build ISO and launch QEMU with UEFI"
+	@echo "  debug        Launch QEMU with GDB stub (-s -S)"
+	@echo "  test         Run all host unit tests and QEMU kernel tests"
+	@echo "  test-qemu    Run kernel tests inside QEMU (headless)"
+	@echo "  debug-test   Run QEMU kernel tests with GDB stub (-s -S)"
+	@echo "  test-host    Run host-side unit tests (requires HOST_TEST_PKGS)"
+	@echo "  clean        Remove cargo build directory and ISO artifacts"
+	@echo "  distclean    Remove build directory and downloaded limine/ovmf files"
+	@echo "  help         Show this usage text"
+	@echo ""
+	@echo "User Variables / Flags:"
+	@echo "  RUST_PROFILE      Cargo profile [dev|release] (default: dev)"
+	@echo "  KVM               Enable KVM acceleration (e.g. KVM=1)"
+	@echo "  CARGO_FLAGS       Extra flags to pass directly to cargo"
+	@echo "  CARGO_TARGET_DIR  Directory for build artifacts (default: target)"
+	@echo "  IMAGE_NAME        Base name of generated ISO (default: modos)"
+	@echo "  QEMUFLAGS         Custom flags passed to qemu-system-x86_64"
+	@echo "  QEMU_WRAPPER      Wrapper script for QEMU (default: ./scripts/run_qemu.sh)"
+	@echo "  LIMINE_BRANCH     Limine repository branch (default: v11.x-binary)"
+	@echo "  HOST_TEST_PKGS    Space-separated list of cargo packages for host testing"
+
 .PHONY: all
 all: $(ISO)
 
