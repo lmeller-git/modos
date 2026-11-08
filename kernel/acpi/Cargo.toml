@@ -1,0 +1,23 @@
+[package]
+name = "acpi"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+aml = ["acpi/aml"]
+
+[dependencies]
+acpi = { version = "6.1.1", default-features = false, features = ["alloc"] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = { workspace = true }
+
+[lints]
+workspace = true

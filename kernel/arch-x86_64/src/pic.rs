@@ -1,4 +1,5 @@
 use core::{
+    fmt::Debug,
     ptr::NonNull,
     sync::atomic::{AtomicU64, Ordering},
 };

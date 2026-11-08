@@ -61,6 +61,8 @@ use crate::{
     pic::enable_timer,
 };
 
+mod acpi;
+mod apic;
 pub mod frame;
 mod gdt;
 mod idt;
@@ -79,7 +81,7 @@ impl InitCapability for X86_64 {
 
     fn initialize() -> Option<Self::InitToken> {
         static SINGLETON: AtomicBool = AtomicBool::new(false);
-        if SINGLETON.swap(true, Ordering::Release) {
+        if SINGLETON.swap(true, Ordering::AcqRel) {
             None
         } else {
             Some(X86_64Init(()))
@@ -245,17 +247,25 @@ impl SmpCapability for X86_64 {
 
         // for this we actuallly need to share some atomic flags, gotta think about dataflow here
 
+        let comm = comm_init(&boot_info);
+        let bsp_cpu: &'static CPUData = unsafe { &*GsBase::read().as_ptr() };
+
         let Some(mp_info) = &boot_info.mp_info else {
             serial_println!("No smp");
-            // TODO should return err such that we know that we are single core. Not fatal, but should be known
-            todo!();
+
+            let packet = Box::leak(Box::new(BSPReleaseData {
+                entry,
+                comm,
+                my_cpu: bsp_cpu,
+                boot_info,
+            }));
+
+            bsp_release(packet)
         };
 
         serial_println!("cores: {}", mp_info.cpus.len());
 
         let cs = capture_cs();
-        let comm = comm_init(&boot_info);
-        let bsp_cpu: &'static mut CPUData = unsafe { &mut *GsBase::read().as_mut_ptr() };
 
         for (cpu, state) in mp_info
             .cpus
