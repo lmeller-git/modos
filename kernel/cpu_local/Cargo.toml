@@ -1,0 +1,20 @@
+[package]
+name = "cpu_local"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+arch-interfaces = { path = "../arch-interfaces" }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
+
+[lints]
+workspace = true

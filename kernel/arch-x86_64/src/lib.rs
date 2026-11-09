@@ -30,6 +30,7 @@ use arch_interfaces::{
         TLBFlushCapability,
     },
 };
+use arch_x86_64_primitives::{CPUData, Primitive};
 use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
 use conquer_once::spin::OnceCell;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
@@ -40,26 +41,22 @@ use x86_64::{
         control::{Cr0, Cr3, Cr4, Cr4Flags},
         model_specific::{GsBase, Msr},
     },
-    structures::{
-        gdt::GlobalDescriptorTable,
-        paging::{
-            FrameAllocator,
-            FrameDeallocator,
-            Mapper,
-            Page,
-            PageSize,
-            PageTableFlags,
-            PhysFrame,
-            Size4KiB,
-            mapper::MapperFlush,
-        },
-        tss::TaskStateSegment,
+    structures::paging::{
+        FrameAllocator,
+        FrameDeallocator,
+        Mapper,
+        Page,
+        PageSize,
+        PageTableFlags,
+        PhysFrame,
+        Size4KiB,
+        mapper::MapperFlush,
     },
 };
 
 use crate::{
     frame::X86FrameAllocView,
-    gdt::{Selectors, build_gdt, build_tss, load_gdt_tss},
+    gdt::{build_gdt, build_tss, load_gdt_tss},
     pic::enable_timer,
 };
 
@@ -105,37 +102,22 @@ impl InitCapability for X86_64 {
     }
 }
 
-fn my_cpu() -> &'static CPUData {
-    unsafe { &*GsBase::read().as_ptr() }
-}
-
 impl CpuDataCapability for X86_64 {
     fn cpu_count() -> usize {
-        my_cpu().cpus.len()
+        Primitive::cpu_count()
     }
 
     fn is_bootstrap_cpu() -> bool {
-        my_cpu().cpu.is_bsp
+        Primitive::is_bootstrap_cpu()
     }
 
     fn my_cpu() -> BootCpu {
-        my_cpu().cpu
+        Primitive::my_cpu()
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {
-        my_cpu().cpus.iter().copied()
+        Primitive::cpus()
     }
-}
-
-#[repr(C)]
-struct CPUData {
-    self_ptr: *const CPUData,
-    cpu: BootCpu,
-    stack: ManuallyDrop<NonNull<u8>>,
-    gdt: GlobalDescriptorTable,
-    selectors: Selectors,
-    tss: &'static TaskStateSegment,
-    cpus: &'static [CpuId],
 }
 
 #[repr(C)]

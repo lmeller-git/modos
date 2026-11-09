@@ -40,6 +40,7 @@ version = "0.1.0"
 dependencies = [
  "acpi",
  "arch-interfaces",
+ "arch-x86_64-primitives",
  "boot",
  "conquer-once",
  "mem-layout",
@@ -47,6 +48,15 @@ dependencies = [
  "raw-cpuid 11.6.0",
  "spin",
  "x2apic",
+ "x86_64",
+]
+
+[[package]]
+name = "arch-x86_64-primitives"
+version = "0.1.0"
+dependencies = [
+ "arch-interfaces",
+ "boot",
  "x86_64",
 ]
 
@@ -109,6 +119,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
 dependencies = [
  "unicode-segmentation",
+]
+
+[[package]]
+name = "cpu_local"
+version = "0.1.0"
+dependencies = [
+ "arch-interfaces",
+ "arch-x86_64-primitives",
 ]
 
 [[package]]

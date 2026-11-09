@@ -1,22 +1,17 @@
+use arch_x86_64_primitives::Selectors;
 use mem_layout::{IST_STACK_SIZE, IST_STACK_START};
 use x86_64::{
     VirtAddr,
     instructions::tables::load_tss,
     registers::segmentation::{CS, SS, Segment},
     structures::{
-        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
+        gdt::{Descriptor, GlobalDescriptorTable},
         paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
         tss::TaskStateSegment,
     },
 };
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
-
-pub(crate) struct Selectors {
-    pub(crate) code_selector: SegmentSelector,
-    pub(crate) data_selector: SegmentSelector,
-    pub(crate) tss_selector: SegmentSelector,
-}
 
 pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
     let mut tss = TaskStateSegment::new();
