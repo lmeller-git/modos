@@ -16,6 +16,7 @@ conquer-once = { workspace = true }
 arch-interfaces = { path = "../arch-interfaces" }
 x2apic = { workspace = true }
 platform = { path = "../platform" }
+mem-layout = { path = "../mem-layout" }
 
 [lints]
 workspace = true

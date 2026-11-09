@@ -14,6 +14,7 @@ categories.workspace = true
 arch = { path = "../arch" }
 linked_list_allocator = "0.10.5"
 spin = { workspace = true }
+mem-layout = { path = "../mem-layout" }
 
 [lints]
 workspace = true

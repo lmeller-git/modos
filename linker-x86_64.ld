@@ -23,6 +23,8 @@ SECTIONS
     /* that is the beginning of the region. */
     . = 0xffffffff80000000;
 
+    __kernel_start = .;
+
     .text : {
         *(.text .text.*)
     } :text
@@ -80,6 +82,7 @@ SECTIONS
         *(COMMON)
     } :data
 
+    __kernel_end = .;
 
     /* Discard .note.* since they may cause issues on some hosts. */
     /DISCARD/ : {

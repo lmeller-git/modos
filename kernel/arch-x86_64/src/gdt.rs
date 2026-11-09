@@ -1,3 +1,4 @@
+use mem_layout::{IST_STACK_SIZE, IST_STACK_START};
 use x86_64::{
     VirtAddr,
     instructions::tables::load_tss,
@@ -10,8 +11,6 @@ use x86_64::{
 };
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
-const IST_STACK_SIZE: usize = 5 * Size4KiB::SIZE as usize;
-const IST_STACK_START: usize = 0xffff_f000_0000_0000;
 
 pub(crate) struct Selectors {
     pub(crate) code_selector: SegmentSelector,

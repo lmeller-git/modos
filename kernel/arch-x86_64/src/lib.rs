@@ -32,6 +32,7 @@ use arch_interfaces::{
 };
 use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
 use conquer_once::spin::OnceCell;
+use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
 use platform::interface::serial::SerialWriterCapability;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
@@ -188,9 +189,6 @@ unsafe fn apply_cs(s: &ControlState) {
     }
 }
 
-const AP_STACK_SIZE: usize = 10 * Size4KiB::SIZE as usize;
-const AP_STACK_START: usize = 0xffff_f000_c000_0000;
-
 fn comm_init(boot_info: &LateBootInfo) -> APBringupSync {
     APBringupSync {
         cores: boot_info
@@ -219,11 +217,11 @@ fn build_core_stack(logical_id: usize) -> NonNull<u8> {
     // GUARD_PAGE
     // NEXT
     // ....
-    let our_base = AP_STACK_START + logical_id * (AP_STACK_SIZE + Size4KiB::SIZE as usize);
+    let our_base = CORE_STACK_START + logical_id * (CORE_STACK_SIZE + Size4KiB::SIZE as usize);
 
     let page_range = Page::<Size4KiB>::range(
         Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
-        Page::containing_address(x86_64::VirtAddr::new((our_base + AP_STACK_SIZE) as u64)),
+        Page::containing_address(x86_64::VirtAddr::new((our_base + CORE_STACK_SIZE) as u64)),
     );
 
     let mut frame_alloc = frame::get_frame_alloc().lock();
@@ -243,7 +241,7 @@ fn build_core_stack(logical_id: usize) -> NonNull<u8> {
         .flush();
     }
 
-    NonNull::new((our_base + AP_STACK_SIZE) as *mut _).unwrap()
+    NonNull::new((our_base + CORE_STACK_SIZE) as *mut _).unwrap()
 }
 
 impl SmpCapability for X86_64 {

@@ -10,6 +10,7 @@ use arch::{
         VirtMemoryFrame,
     },
 };
+use mem_layout::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START};
 
 use crate::linked_list::SafeHeap;
 
@@ -73,13 +74,10 @@ pub mod linked_list {
     }
 }
 
-pub const HEAP_START: usize = 0x_7444_4444_0000;
-pub const HEAP_SIZE: usize = 10000 * 1024; // 10 MiB
-
 pub fn init(alloc: &SafeHeap) {
     let page_range = {
-        let heap_start = VirtAddr::new(HEAP_START);
-        let heap_end = heap_start + HEAP_SIZE;
+        let heap_start = VirtAddr::new(KERNEL_HEAP_START);
+        let heap_end = heap_start + KERNEL_HEAP_SIZE;
         let heap_start_page = VirtMemoryFrame::containing_address(heap_start);
         let heap_end_page = VirtMemoryFrame::containing_address(heap_end);
         VirtMemoryFrame::range(heap_start_page, heap_end_page)
@@ -92,7 +90,7 @@ pub fn init(alloc: &SafeHeap) {
             .unwrap()
             .flush();
     }
-    unsafe { alloc.init(HEAP_START as *mut u8, HEAP_SIZE) };
+    unsafe { alloc.init(KERNEL_HEAP_START as *mut u8, KERNEL_HEAP_SIZE) };
 }
 
 pub fn add(left: u64, right: u64) -> u64 {
