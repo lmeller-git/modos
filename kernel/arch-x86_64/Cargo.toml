@@ -19,6 +19,7 @@ platform = { path = "../platform" }
 mem-layout = { path = "../mem-layout" }
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
 mem-layout = { path = "../mem-layout" }
+arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
 
 [lints]
 workspace = true
