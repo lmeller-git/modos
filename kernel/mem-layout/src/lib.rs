@@ -20,11 +20,19 @@ pub const APPROX_KIMAGE_START: usize = 0xffff_ffff_8000_0000;
 unsafe extern "C" {
     static __kernel_start: u8;
     static __kernel_end: u8;
+    static __cpu_local_start: u8;
+    static __cpu_local_end: u8;
 }
 
 pub fn kimage_range() -> (usize, usize) {
     let start = unsafe { &__kernel_start as *const _ as usize };
     let end = unsafe { &__kernel_end as *const _ as usize };
+    (start, end)
+}
+
+pub fn cpu_local_range() -> (usize, usize) {
+    let start = unsafe { &__cpu_local_start as *const _ as usize };
+    let end = unsafe { &__cpu_local_end as *const _ as usize };
     (start, end)
 }
 

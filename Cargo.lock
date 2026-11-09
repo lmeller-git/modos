@@ -127,6 +127,7 @@ version = "0.1.0"
 dependencies = [
  "arch-interfaces",
  "arch-x86_64-primitives",
+ "mem-layout",
 ]
 
 [[package]]

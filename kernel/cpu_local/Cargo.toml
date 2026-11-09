@@ -12,6 +12,7 @@ categories.workspace = true
 
 [dependencies]
 arch-interfaces = { path = "../arch-interfaces" }
+mem-layout = { path = "../mem-layout" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
