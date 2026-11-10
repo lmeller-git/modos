@@ -1,5 +1,5 @@
 [package]
-name = "cpu_local"
+name = "core_local"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -13,6 +13,7 @@ categories.workspace = true
 [dependencies]
 arch-interfaces = { path = "../arch-interfaces" }
 mem-layout = { path = "../mem-layout" }
+core_local_macros = { path = "core_local_macros" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
