@@ -51,11 +51,11 @@ SECTIONS
         __eh_frame_end = .;
     } :rodata
 
-    . = ALIGN(8);
+    . = ALIGN(64);
 
     __cpu_local_start = .;
     .percpu : {
-        *(.cpu_local .cpu_local.*)
+        KEEP(*(.cpu_local .cpu_local.*))
     } :rodata
     __cpu_local_end = .;
 

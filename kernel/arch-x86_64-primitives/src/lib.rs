@@ -1,4 +1,6 @@
-use std::{mem::ManuallyDrop, ptr::NonNull};
+#![no_std]
+
+use core::{mem::ManuallyDrop, ptr::NonNull};
 
 use arch_interfaces::cpu::{CpuDataCapability, CpuId};
 use boot::mp::BootCpu;
@@ -27,6 +29,7 @@ pub struct CPUData {
     pub selectors: Selectors,
     pub tss: &'static TaskStateSegment,
     pub cpus: &'static [CpuId],
+    pub cls: *const [u8],
 }
 
 pub fn my_cpu() -> &'static CPUData {
@@ -44,6 +47,10 @@ impl CpuDataCapability for Primitive {
 
     fn my_cpu() -> BootCpu {
         my_cpu().cpu
+    }
+
+    fn public_data_base() -> *const () {
+        my_cpu().cls.cast()
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {

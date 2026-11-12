@@ -18,6 +18,7 @@ x2apic = { workspace = true }
 platform = { path = "../platform" }
 mem-layout = { path = "../mem-layout" }
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
+core_local = { path = "../core_local" }
 
 [lints]
 workspace = true

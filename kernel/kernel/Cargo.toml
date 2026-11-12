@@ -19,6 +19,7 @@ boot = { path = "../boot" }
 arch = { path = "../arch" }
 early_heap = { path = "../early_heap" }
 platform = { path = "../platform" }
+core_local = { path = "../core_local" }
 
 [lints]
 workspace = true

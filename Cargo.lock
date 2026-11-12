@@ -43,6 +43,7 @@ dependencies = [
  "arch-x86_64-primitives",
  "boot",
  "conquer-once",
+ "core_local",
  "mem-layout",
  "platform",
  "raw-cpuid 11.6.0",
@@ -128,7 +129,6 @@ dependencies = [
  "arch-interfaces",
  "arch-x86_64-primitives",
  "core_local_macros",
- "mem-layout",
 ]
 
 [[package]]
@@ -195,6 +195,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "boot",
+ "core_local",
  "early_heap",
  "platform",
 ]

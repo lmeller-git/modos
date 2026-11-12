@@ -33,6 +33,7 @@ use arch_interfaces::{
 use arch_x86_64_primitives::{CPUData, Primitive};
 use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
 use conquer_once::spin::OnceCell;
+use core_local::allocate_cls_block;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
 use platform::interface::serial::SerialWriterCapability;
 use x86_64::{
@@ -113,6 +114,10 @@ impl CpuDataCapability for X86_64 {
 
     fn my_cpu() -> BootCpu {
         Primitive::my_cpu()
+    }
+
+    fn public_data_base() -> *const () {
+        Primitive::public_data_base()
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {
@@ -258,25 +263,7 @@ impl SmpCapability for X86_64 {
             .filter(|core| !core.is_bsp)
             .zip(comm.cores.iter())
         {
-            let stack = build_core_stack(cpu.logical_id);
-
-            let tss = build_tss(cpu.logical_id);
-            let tss = Box::leak(Box::new(tss));
-
-            let (gdt, selectors) = build_gdt(tss);
-
-            let data = CPUData {
-                self_ptr: null(),
-                cpu: *cpu,
-                stack: ManuallyDrop::new(stack),
-                gdt,
-                tss,
-                selectors,
-                cpus: bsp_cpu.cpus,
-            };
-
-            let data = Box::leak(Box::new(data));
-            data.self_ptr = data as *const CPUData;
+            let data = build_cpu(cpu, bsp_cpu.cpus);
 
             let my_packet = Box::leak(Box::new(CPUStartupData {
                 data,
@@ -533,6 +520,29 @@ pub fn early_init(boot_info: &EarlyBootInfo<'_>) {
     init_xmm();
 }
 
+fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
+    let bsp_stack = build_core_stack(cpu.logical_id);
+    let tss = build_tss(cpu.logical_id);
+    let tss = Box::leak(Box::new(tss));
+    let (gdt, selectors) = build_gdt(tss);
+    let cls = allocate_cls_block();
+
+    let my_data = CPUData {
+        self_ptr: null(),
+        cpu: *cpu,
+        stack: ManuallyDrop::new(bsp_stack),
+        gdt,
+        selectors,
+        tss,
+        cpus,
+        cls,
+    };
+
+    let my_data = Box::leak(Box::new(my_data));
+    my_data.self_ptr = my_data as *const CPUData;
+    my_data
+}
+
 pub fn late_init(boot_info: &LateBootInfo) {
     let my_cpu = boot_info
         .mp_info
@@ -557,24 +567,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
             .unwrap_or([CpuId::new(0)].into()),
     );
 
-    let bsp_stack = build_core_stack(my_cpu.logical_id);
-    let tss = build_tss(my_cpu.logical_id);
-    let tss = Box::leak(Box::new(tss));
-    let (gdt, selectors) = build_gdt(tss);
-
-    let my_data = CPUData {
-        self_ptr: null(),
-        cpu: *my_cpu,
-        stack: ManuallyDrop::new(bsp_stack),
-        gdt,
-        selectors,
-        tss,
-        cpus,
-    };
-
-    let my_data = Box::leak(Box::new(my_data));
-    my_data.self_ptr = my_data as *const CPUData;
-
+    let my_data = build_cpu(my_cpu, cpus);
     let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
 
     GsBase::write(my_data_ptr);

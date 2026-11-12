@@ -1,5 +1,3 @@
-use core::ops::Deref;
-
 use boot::{LateBootInfo, mp::BootCpu};
 use derive_more::{Binary, Display, LowerHex, Octal, UpperHex};
 
@@ -34,21 +32,8 @@ impl CpuId {
     }
 }
 
-pub struct CpuLocal<T, S> {
-    /// arch specific data stored per CPU. derefs to `BootCpu` in `CpuDataCapability`
-    pub arch: T,
-    /// Cpu local storage
-    pub storage: S, // TODO sync primitives for this core.
-                    // sync: M,
-                    //...
-}
-
-pub trait Storage<T> {}
-
 /// Architectures supporting this can be queried for various information regarding cpu topology and core state.
 pub trait CpuDataCapability {
-    type Data: Deref<Target = BootCpu>;
-    type Storage;
     /// Returns the total count of active cores.
     fn cpu_count() -> usize;
     /// Is the core we are on the BSP?
@@ -56,7 +41,9 @@ pub trait CpuDataCapability {
     /// Returns an iterator over all active logical core ids.
     fn cpus() -> impl Iterator<Item = CpuId>;
     /// Returns data representing the core we are on.
-    fn my_cpu() -> &'static CpuLocal<Self::Data, Self::Storage>;
+    fn my_cpu() -> BootCpu;
+    /// Returns the base address at which this cores public data is stored.
+    fn public_data_base() -> *const ();
 }
 
 pub trait SmpCapability {
