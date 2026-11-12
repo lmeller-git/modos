@@ -48,6 +48,11 @@ fn core_main() -> ! {
     serial_println!("Hello from cpu {:?}", cpu);
 
     CORE_ID.with_mut(|id| *id = cpu.logical_id);
+
+    for _ in 0..10000 {
+        spin_loop();
+    }
+
     CORE_ID.with(|id| assert_eq!(*id, cpu.logical_id));
 
     for _ in 0..1000000 {
