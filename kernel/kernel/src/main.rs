@@ -40,9 +40,15 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::core_release(init_once, late_info, core_main)
 }
 
+#[core_local::core_local]
+static CORE_ID: usize = 0;
+
 fn core_main() -> ! {
     let cpu = arch::TargetArch::my_cpu();
     serial_println!("Hello from cpu {:?}", cpu);
+
+    CORE_ID.with_mut(|id| *id = cpu.logical_id);
+    CORE_ID.with(|id| assert_eq!(*id, cpu.logical_id));
 
     for _ in 0..1000000 {
         spin_loop();

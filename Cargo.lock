@@ -40,13 +40,24 @@ version = "0.1.0"
 dependencies = [
  "acpi",
  "arch-interfaces",
+ "arch-x86_64-primitives",
  "boot",
  "conquer-once",
+ "core_local",
  "mem-layout",
  "platform",
  "raw-cpuid 11.6.0",
  "spin",
  "x2apic",
+ "x86_64",
+]
+
+[[package]]
+name = "arch-x86_64-primitives"
+version = "0.1.0"
+dependencies = [
+ "arch-interfaces",
+ "boot",
  "x86_64",
 ]
 
@@ -112,6 +123,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_local"
+version = "0.1.0"
+dependencies = [
+ "arch-interfaces",
+ "arch-x86_64-primitives",
+ "core_local_macros",
+]
+
+[[package]]
+name = "core_local_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "derive_more"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -166,6 +195,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "boot",
+ "core_local",
  "early_heap",
  "platform",
 ]
@@ -333,9 +363,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.9"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -359,7 +389,7 @@ checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.9",
+ "syn 3.0.10",
 ]
 
 [[package]]

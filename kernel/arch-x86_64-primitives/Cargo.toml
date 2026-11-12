@@ -1,0 +1,19 @@
+[package]
+name = "arch-x86_64-primitives"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+arch-interfaces = { path = "../arch-interfaces" }
+x86_64 = { workspace = true }
+boot = { path = "../boot" }
+
+[lints]
+workspace = true

@@ -51,6 +51,14 @@ SECTIONS
         __eh_frame_end = .;
     } :rodata
 
+    . = ALIGN(64);
+
+    __cpu_local_start = .;
+    .percpu : {
+        KEEP(*(.cpu_local .cpu_local.*))
+    } :rodata
+    __cpu_local_end = .;
+
     /* Move to the next memory page for .data */
     . = ALIGN(CONSTANT(MAXPAGESIZE));
 

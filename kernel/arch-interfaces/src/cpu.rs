@@ -42,6 +42,8 @@ pub trait CpuDataCapability {
     fn cpus() -> impl Iterator<Item = CpuId>;
     /// Returns data representing the core we are on.
     fn my_cpu() -> BootCpu;
+    /// Returns the base address at which this cores public data is stored.
+    fn public_data_base() -> *const ();
 }
 
 pub trait SmpCapability {
