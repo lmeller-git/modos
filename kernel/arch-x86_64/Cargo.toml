@@ -11,7 +11,7 @@ spin = { workspace = true }
 x86_64 = { workspace = true }
 boot = { path = "../boot" }
 raw-cpuid = "11.5.0"
-acpi = { version = "5.2.0", features = ["alloc"] }
+acpi = { version = "6.1.1", features = ["alloc"] }
 conquer-once = { workspace = true }
 arch-interfaces = { path = "../arch-interfaces" }
 x2apic = { workspace = true }
