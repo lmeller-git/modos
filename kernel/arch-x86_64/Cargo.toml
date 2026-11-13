@@ -13,7 +13,7 @@ boot = { path = "../boot" }
 raw-cpuid = "11.5.0"
 conquer-once = { workspace = true }
 arch-interfaces = { path = "../arch-interfaces" }
-acpi = { path = "../acpi" }
+kernel-acpi = { path = "../acpi" }
 x2apic = { workspace = true }
 platform = { path = "../platform" }
 mem-layout = { path = "../mem-layout" }

@@ -4,8 +4,8 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use acpi::AcpiTables;
 use conquer_once::spin::OnceCell;
+use kernel_acpi::AcpiTables;
 use spin::Mutex;
 use x86_64::{
     PhysAddr,

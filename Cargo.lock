@@ -4,14 +4,6 @@ version = 4
 
 [[package]]
 name = "acpi"
-version = "0.1.0"
-dependencies = [
- "acpi 6.1.1",
- "x86_64",
-]
-
-[[package]]
-name = "acpi"
 version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b763acdc1d85c36d61acf97a59938f23202d0e8efe45e8759de10c02db242744"
@@ -49,12 +41,12 @@ dependencies = [
 name = "arch-x86_64"
 version = "0.1.0"
 dependencies = [
- "acpi 0.1.0",
  "arch-interfaces",
  "arch-x86_64-primitives",
  "boot",
  "conquer-once",
  "core_local",
+ "kernel-acpi",
  "mem-layout",
  "platform",
  "raw-cpuid 11.6.0",
@@ -80,9 +72,9 @@ checksum = "2b645c5c09a7d4035949cfce1a915785aaad6f17800c35fda8a8c311c491f284"
 
 [[package]]
 name = "bit_field"
-version = "0.10.3"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
+checksum = "cb2907cc03d08cdb1c6724ad0670ce67c4a71e1c45a6d7635224011714cfc4b1"
 
 [[package]]
 name = "bitflags"
@@ -215,6 +207,14 @@ dependencies = [
  "core_local",
  "early_heap",
  "platform",
+]
+
+[[package]]
+name = "kernel-acpi"
+version = "0.1.0"
+dependencies = [
+ "acpi",
+ "x86_64",
 ]
 
 [[package]]
