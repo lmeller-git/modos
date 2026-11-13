@@ -6,22 +6,27 @@ use core::{
 use acpi::{Handler, PciAddress, PhysicalMapping};
 #[cfg(target_arch = "x86_64")]
 use x86_64::instructions::port;
+use x86_64::structures::port::{PortRead, PortWrite};
 
 struct Port<T>(#[cfg(target_arch = "x86_64")] port::Port<T>);
 
-impl Port {
-    fn new(port: T) -> Self {
+impl<T> Port<T> {
+    fn new(port: u16) -> Self {
         #[cfg(target_arch = "x86_64")]
         Self(port::Port::new(port))
     }
+}
 
+impl<T: PortRead> Port<T> {
     unsafe fn read(&mut self) -> T {
         #[cfg(target_arch = "x86_64")]
         unsafe {
             self.0.read()
         }
     }
+}
 
+impl<T: PortWrite> Port<T> {
     unsafe fn write(&mut self, v: T) {
         #[cfg(target_arch = "x86_64")]
         unsafe {
@@ -67,7 +72,13 @@ impl Handler for KernelAcpiHandler {
         size: usize,
     ) -> PhysicalMapping<Self, T> {
         let virt = NonNull::new(self.virt(physical_address) as *mut T).expect("null ACPI mapping");
-        unsafe { PhysicalMapping::new(physical_address, virt, size, size, *self) }
+        PhysicalMapping {
+            physical_start: physical_address,
+            virtual_start: virt,
+            region_length: size,
+            mapped_length: size,
+            handler: *self,
+        }
     }
 
     fn unmap_physical_region<T>(_region: &PhysicalMapping<Self, T>) {}

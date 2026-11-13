@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+use alloc::vec::Vec;
+
 use acpi::{
     AcpiTables,
     platform::{AcpiPlatform, InterruptModel, interrupt::Apic},
@@ -33,9 +35,9 @@ pub struct InterruptConfig {
 }
 
 pub fn parse(hhdm: usize, rsdp_phys: usize) -> InterruptConfig {
-    let mut handler = KernelAcpiHandler::new(hhdm);
-    let tables = unsafe { AcpiTables::from_rsdp(&mut handler, rsdp_phys) }.unwrap();
-    let platform = AcpiPlatform::new(tables, &mut handler).unwrap();
+    let handler = KernelAcpiHandler::new(hhdm);
+    let tables = unsafe { AcpiTables::from_rsdp(handler, rsdp_phys) }.unwrap();
+    let platform = AcpiPlatform::new(tables, handler).unwrap();
 
     match platform.interrupt_model {
         InterruptModel::Apic(apic) => apic_parse(apic),
