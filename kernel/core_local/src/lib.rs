@@ -2,7 +2,13 @@
 
 extern crate alloc;
 
-use core::{alloc::Layout, marker::PhantomData, mem::MaybeUninit, ptr};
+use alloc::boxed::Box;
+use core::{
+    alloc::Layout,
+    marker::PhantomData,
+    ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 // Cpu local data storage. Relies on corret setup from arch.
 //
@@ -25,13 +31,15 @@ struct CpuDataProvider;
 pub mod __private {
     use core::cell::UnsafeCell;
 
+    use crate::CpuLocalData;
+
     #[repr(transparent)]
-    pub struct CoreLocalStorage<T>(UnsafeCell<T>);
+    pub struct CoreLocalStorage<T: CpuLocalData>(pub(crate) UnsafeCell<T>);
 
     // SAFETY: This is only accessed via controlled core_local structs.
-    unsafe impl<T> Sync for CoreLocalStorage<T> {}
+    unsafe impl<T: CpuLocalData + Send> Sync for CoreLocalStorage<T> {}
 
-    impl<T> CoreLocalStorage<T> {
+    impl<T: CpuLocalData> CoreLocalStorage<T> {
         pub const fn new(val: T) -> Self {
             Self(UnsafeCell::new(val))
         }
@@ -41,12 +49,73 @@ pub mod __private {
 use __private::CoreLocalStorage;
 use arch_interfaces::cpu::CpuDataCapability;
 
+/// # Safety
+/// Must be safe to bitwise-copy from the `.cpu_local` template at core boot.
+pub unsafe trait CpuLocalData {}
+
+unsafe impl<T: Copy> CpuLocalData for T {}
+unsafe impl<T> CpuLocalData for CLSLazyPtr<T> {}
+
+pub struct CLSLazyPtr<T>(AtomicPtr<T>);
+
+unsafe impl<T: Send> Sync for CLSLazyPtr<T> {}
+unsafe impl<T: Send> Send for CLSLazyPtr<T> {}
+
+impl<T> CLSLazyPtr<T> {
+    pub const fn new() -> Self {
+        Self(AtomicPtr::new(ptr::null_mut()))
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        let ptr = self.0.load(Ordering::Acquire);
+        unsafe { ptr.as_mut() }
+    }
+
+    #[inline]
+    pub fn get(&self) -> Option<&T> {
+        let ptr = self.0.load(Ordering::Acquire);
+        unsafe { ptr.as_ref() }
+    }
+
+    #[inline]
+    pub fn get_or_init(&self, init: impl FnOnce() -> Box<T>) -> &T {
+        if let Some(val) = self.get() {
+            return val;
+        }
+        self.init_slow(init)
+    }
+
+    #[cold]
+    fn init_slow(&self, init: impl FnOnce() -> Box<T>) -> &T {
+        let new_ptr = Box::into_raw(init());
+        match self.0.compare_exchange(
+            ptr::null_mut(),
+            new_ptr,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => unsafe { &*new_ptr },
+            Err(existing) => {
+                unsafe { drop(Box::from_raw(new_ptr)) };
+                unsafe { &*existing }
+            }
+        }
+    }
+}
+
+impl<T> Default for CLSLazyPtr<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 unsafe extern "C" {
     static __cpu_local_start: u8;
     static __cpu_local_end: u8;
 }
 
-pub struct CoreLocal<T> {
+pub struct CoreLocal<T: CpuLocalData> {
     // TODO:
     // we could circumvent storing this ptr by generating one type/method per core_local variable and just inlinign &raw const STATIC at the call site.
     // Makes the whole thing a bit more complex though and might need some trait plumbing.
@@ -55,9 +124,9 @@ pub struct CoreLocal<T> {
 }
 
 // SAFETY: The ptr here is never actually dereferenced. It is just used for offset calculation and access are redirected to core_local seciton.
-unsafe impl<T> Sync for CoreLocal<T> {}
+unsafe impl<T: CpuLocalData> Sync for CoreLocal<T> {}
 
-impl<T> CoreLocal<T> {
+impl<T: CpuLocalData> CoreLocal<T> {
     /// # Safety
     /// the passed item pointed to by the passed ptr must sit in the `.cpu_local` section.
     pub const unsafe fn new(template: *const CoreLocalStorage<T>) -> Self {
@@ -69,7 +138,7 @@ impl<T> CoreLocal<T> {
 
     // TODO: maybe make thius private
     #[inline]
-    pub fn as_ptr(&self) -> *const T {
+    pub fn as_ptr(&self) -> *const CoreLocalStorage<T> {
         let start = (&raw const __cpu_local_start) as usize;
         let addr = self.template as usize;
 
@@ -83,8 +152,8 @@ impl<T> CoreLocal<T> {
     #[inline]
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         // TODO: pin to this core
-        let ptr = self.as_ptr();
-        unsafe { f(&*ptr) }
+        let cell = unsafe { &*self.as_ptr() };
+        unsafe { f(&*cell.0.get()) }
     }
 
     #[inline]
@@ -93,8 +162,8 @@ impl<T> CoreLocal<T> {
         // I.e. disable interrupts.
         // Then this is safe, because only someone runnign on this core can (safely) access this core_local variable
         // and we are guaranteed to be the only one holding a ref for the duration of f.
-        let ptr = self.as_ptr().cast_mut();
-        unsafe { f(&mut *ptr) }
+        let cell = unsafe { &*self.as_ptr() };
+        unsafe { f(&mut *cell.0.get()) }
     }
 }
 
@@ -104,7 +173,7 @@ pub fn allocate_cls_block() -> *mut [u8] {
     let size = end - start;
 
     if size == 0 {
-        return unsafe { MaybeUninit::<*mut [u8]>::zeroed().assume_init() };
+        return ptr::slice_from_raw_parts_mut(ptr::null_mut(), 0);
     }
 
     let layout = Layout::from_size_align(size, 64).unwrap();
