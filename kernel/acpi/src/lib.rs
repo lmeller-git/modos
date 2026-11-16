@@ -3,10 +3,15 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::sync::atomic::AtomicU64;
 
 use acpi::{
     AcpiTables,
-    platform::{AcpiPlatform, InterruptModel, interrupt::Apic},
+    platform::{
+        AcpiPlatform,
+        InterruptModel,
+        interrupt::{Apic, NmiLine, NmiSource},
+    },
     sdt::madt::{Polarity, TriggerMode},
 };
 
@@ -14,12 +19,17 @@ use crate::handler::KernelAcpiHandler;
 
 mod handler;
 
+pub static TSC_HZ: AtomicU64 = AtomicU64::new(0);
+pub static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IoApicInfo {
     pub id: u8,
     pub phys: u64,
     pub gsi_base: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IsaOverride {
     pub isa_irq: u8,
     pub gsi: u32,
@@ -29,6 +39,8 @@ pub struct IsaOverride {
 
 pub struct InterruptConfig {
     pub lapic_phys: u64,
+    pub lapic_nmi_lines: Vec<NmiLine>,
+    pub nmi_souces: Vec<NmiSource>,
     pub ioapics: Vec<IoApicInfo>,
     pub overrides: Vec<IsaOverride>,
     pub has_legacy_pic: bool,
@@ -68,6 +80,8 @@ fn apic_parse(apic: Apic) -> InterruptConfig {
             })
             .collect(),
         has_legacy_pic: apic.also_has_legacy_pics,
+        nmi_souces: apic.nmi_sources,
+        lapic_nmi_lines: apic.local_apic_nmi_lines,
     }
 }
 

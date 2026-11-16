@@ -8,6 +8,8 @@ use acpi::{Handler, PciAddress, PhysicalMapping};
 use x86_64::instructions::port;
 use x86_64::structures::port::{PortRead, PortWrite};
 
+use crate::{BOOT_TSC, TSC_HZ};
+
 struct Port<T>(#[cfg(target_arch = "x86_64")] port::Port<T>);
 
 impl<T> Port<T> {
@@ -34,9 +36,6 @@ impl<T: PortWrite> Port<T> {
         }
     }
 }
-
-pub static TSC_HZ: AtomicU64 = AtomicU64::new(0);
-pub static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 pub struct KernelAcpiHandler {

@@ -57,8 +57,6 @@ pub(super) extern "x86-interrupt" fn gpf_handler(
     panic!("EXCEPTION: GENERAL PROTECTION FAULT\n{stack_frame:#?}\nError Code: {error_code:b}");
 }
 
-pub(super) const SPURIOUS_VECTOR: u8 = 0xFF;
-
 pub(super) extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // nothing to do
     serial_println!("spurious interrupt");

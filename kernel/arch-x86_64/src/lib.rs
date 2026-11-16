@@ -58,7 +58,6 @@ use x86_64::{
 use crate::{
     frame::X86FrameAllocView,
     gdt::{build_gdt, build_tss, load_gdt_tss},
-    pic::enable_timer,
 };
 
 mod acpi;
@@ -379,6 +378,10 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);
     GsBase::write(my_data_ptr);
 
+    unsafe { apic::init_ap() };
+    interrupts::enable();
+    apic::enable_timer();
+
     state.store(true, Ordering::Release);
     while !gate.load(Ordering::Acquire) {
         spin_loop();
@@ -584,13 +587,17 @@ pub fn late_init(boot_info: &LateBootInfo) {
     load_gdt_tss(&my_data.gdt, &my_data.selectors);
 
     idt::init_idt();
-    pic::init_apic(
+
+    kernel_acpi::BOOT_TSC.store(apic::timer::rdtsc_serialized(), Ordering::Relaxed);
+
+    let config = kernel_acpi::parse(
         boot_info.hhdm_offset.unwrap(),
-        boot_info.rsdp_addr.unwrap().as_ptr() as usize,
+        boot_info.rsdp_addr.unwrap().addr().get() - boot_info.hhdm_offset.unwrap(),
     );
 
+    apic::init_bsp(&config);
     interrupts::enable();
-    enable_timer();
+    apic::enable_timer();
 }
 
 fn init_xmm() {
