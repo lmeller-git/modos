@@ -371,8 +371,8 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
         state,
         gate,
     } = *unsafe { Box::from_raw(my_packet as *mut CPUStartupData) };
-    load_gdt_tss(&data.gdt, &data.selectors);
 
+    load_gdt_tss(&data.gdt, &data.selectors);
     idt::IDT.get().unwrap().load();
 
     let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);

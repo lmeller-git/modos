@@ -5,7 +5,7 @@ use x86_64::{
     structures::idt::{InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{pic::end_interrupt, serial_println};
+use crate::{apic::lapic::end_interrupt, serial_println};
 
 static TOTAL_TIMER_TICKS: AtomicU64 = AtomicU64::new(0);
 
@@ -60,5 +60,10 @@ pub(super) extern "x86-interrupt" fn gpf_handler(
 pub(super) extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // nothing to do
     serial_println!("spurious interrupt");
+    end_interrupt();
+}
+
+pub(super) extern "x86-interrupt" fn error_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    serial_println!("error interrupt");
     end_interrupt();
 }

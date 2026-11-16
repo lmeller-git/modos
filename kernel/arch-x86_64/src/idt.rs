@@ -6,6 +6,7 @@ use crate::{
     irq::{
         breakpoint_handler,
         double_fault_handler,
+        error_interrupt_handler,
         gpf_handler,
         keyboard_interrupt_handler,
         page_fault_handler,
@@ -29,7 +30,8 @@ pub(crate) fn init_idt() {
     idt.general_protection_fault.set_handler_fn(gpf_handler);
     idt[InterruptIndex::Timer as u8].set_handler_fn(timer_interrupt);
     idt[InterruptIndex::Keyboard as u8].set_handler_fn(keyboard_interrupt_handler);
-    idt[InterruptIndex::Spurious].set_handler_fn(spurious_interrupt_handler);
+    idt[InterruptIndex::Spurious as u8].set_handler_fn(spurious_interrupt_handler);
+    idt[InterruptIndex::Error as u8].set_handler_fn(error_interrupt_handler);
 
     IDT.init_once(|| idt);
 
