@@ -604,7 +604,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
         unsafe { kernel_acpi::parse(hhdm, rsdp_phys, apic::timer::nanos_since_boot) }.unwrap();
 
     let bsp_id = unsafe { apic::init_bsp(&config) };
-    if bsp_id != my_cpu.hw_id as u32 {
+    if bsp_id != my_cpu.hw_id {
         serial_println!(
             "[WARN] BSP APIC ID {} != bootloader hw_id {}",
             bsp_id,

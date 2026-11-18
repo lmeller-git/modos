@@ -86,7 +86,7 @@ pub(crate) unsafe fn init_bsp(config: &InterruptConfig) -> u32 {
     let bsp_id = unsafe { lapic::init_core_lapic() };
     timer::calibrate_lapic_timer();
 
-    ioapic::init(config);
+    ioapic::init(config, bsp_id);
 
     bsp_id
 }
@@ -126,13 +126,29 @@ pub(crate) mod lapic {
 
     /// xAPIC MMIO register offsets.
     mod reg {
-        pub const TPR: u32 = 0x080;
-        pub const LVT_LINT0: u32 = 0x350;
-        pub const LVT_LINT1: u32 = 0x360;
+        pub(crate) const TPR: u32 = 0x080;
+        pub(crate) const LVT_LINT0: u32 = 0x350;
+        pub(crate) const LVT_LINT1: u32 = 0x360;
     }
 
     /// LVT entry: delivery mode NMI, edge triggered, active high, not masked.
     const LVT_NMI: u32 = 0b100 << 8;
+
+    /// LVT entry: delivery mode NMI (100b), unmasked.
+    const LVT_NMI_BASE: u32 = 0b100 << 8;
+    const LVT_PIN_POLARITY_LOW: u32 = 1 << 13;
+    const LVT_TRIGGER_LEVEL: u32 = 1 << 15;
+
+    fn lvt_nmi_value(nmi: kernel_acpi::LapicNmi) -> u32 {
+        let mut val = LVT_NMI_BASE;
+        if nmi.active_low {
+            val |= LVT_PIN_POLARITY_LOW;
+        }
+        if nmi.level {
+            val |= LVT_TRIGGER_LEVEL;
+        }
+        val
+    }
 
     #[derive(Clone, Copy, Debug)]
     enum Mode {
@@ -216,11 +232,11 @@ pub(crate) mod lapic {
                 .get()
                 .expect("local APIC NMI table not initialised")
                 .lints_for(id);
-            if lint0 {
-                write_reg(reg::LVT_LINT0, LVT_NMI);
+            if let Some(nmi) = lint0 {
+                write_reg(reg::LVT_LINT0, lvt_nmi_value(nmi));
             }
-            if lint1 {
-                write_reg(reg::LVT_LINT1, LVT_NMI);
+            if let Some(nmi) = lint1 {
+                write_reg(reg::LVT_LINT1, lvt_nmi_value(nmi));
             }
         }
 
@@ -263,8 +279,12 @@ pub(crate) mod ioapic {
     static IOAPIC: OnceCell<IoApicManager> = OnceCell::uninit();
 
     /// Discover and park every I/O APIC, then publish the manager
-    pub(super) fn init(config: &InterruptConfig) {
-        IOAPIC.init_once(|| unsafe { IoApicManager::new(config) });
+    pub(super) fn init(config: &InterruptConfig, bsp_id: u32) {
+        let mgr = unsafe { IoApicManager::new(config) };
+        for nmi in &config.nmi_sources {
+            mgr.route_nmi(nmi.gsi, bsp_id, nmi.active_low, nmi.level);
+        }
+        IOAPIC.init_once(|| mgr);
     }
 
     struct ManagedIoApic {
@@ -275,14 +295,14 @@ pub(crate) mod ioapic {
     // SAFETY: IoApic wraps an MMIO pointer; every access goes through the Mutex below.
     unsafe impl Send for ManagedIoApic {}
 
-    pub struct IoApicManager {
+    pub(crate) struct IoApicManager {
         ioapics: Mutex<Vec<ManagedIoApic>>,
         overrides: Vec<IsaOverride>,
     }
 
     impl IoApicManager {
         /// Panics if `apic::init_bsp` has not run yet.
-        pub fn global() -> &'static Self {
+        pub(crate) fn global() -> &'static Self {
             IOAPIC.get().expect("I/O APIC not initialised")
         }
 
@@ -320,7 +340,13 @@ pub(crate) mod ioapic {
 
         /// Route legacy ISA IRQ `isa_irq`, honouring MADT interrupt source overrides
         /// (default: identity-mapped GSI, edge triggered, active high).
-        pub fn route_isa_irq(&self, isa_irq: u8, vector: u8, dest_apic_id: u32, masked: bool) {
+        pub(crate) fn route_isa_irq(
+            &self,
+            isa_irq: u8,
+            vector: u8,
+            dest_apic_id: u32,
+            masked: bool,
+        ) {
             let (gsi, active_low, level) = self
                 .overrides
                 .iter()
@@ -330,9 +356,43 @@ pub(crate) mod ioapic {
             self.route_gsi(gsi, vector, dest_apic_id, active_low, level, masked);
         }
 
-        pub fn route_gsi(
+        pub(crate) fn route_gsi(
             &self,
             gsi: u32,
+            vector: u8,
+            dest_apic_id: u32,
+            active_low: bool,
+            level: bool,
+            masked: bool,
+        ) {
+            self.program_gsi(
+                gsi,
+                IrqMode::Fixed,
+                vector,
+                dest_apic_id,
+                active_low,
+                level,
+                masked,
+            );
+        }
+
+        pub(crate) fn route_nmi(&self, gsi: u32, dest_apic_id: u32, active_low: bool, level: bool) {
+            self.program_gsi(
+                gsi,
+                IrqMode::NonMaskable,
+                0,
+                dest_apic_id,
+                active_low,
+                level,
+                false,
+            );
+        }
+
+        #[expect(clippy::too_many_arguments)]
+        fn program_gsi(
+            &self,
+            gsi: u32,
+            mode: IrqMode,
             vector: u8,
             dest_apic_id: u32,
             active_low: bool,
@@ -364,7 +424,7 @@ pub(crate) mod ioapic {
                 }
 
                 let mut entry = RedirectionTableEntry::default();
-                entry.set_mode(IrqMode::Fixed);
+                entry.set_mode(mode);
                 entry.set_flags(flags);
                 entry.set_vector(vector);
                 entry.set_dest(dest);
@@ -419,7 +479,7 @@ pub(crate) mod timer {
     /// firmware left the TSCs synchronised (true on virtually all invariant-TSC machines).
     pub(crate) static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
 
-    pub static LAPIC_TICKS_PER_MS: AtomicU32 = AtomicU32::new(0);
+    pub(crate) static LAPIC_TICKS_PER_MS: AtomicU32 = AtomicU32::new(0);
 
     #[inline]
     pub(crate) fn rdtsc_serialized() -> u64 {
@@ -476,7 +536,7 @@ pub(crate) mod timer {
         unsafe {
             let b = port_b.read() & !0x03; // GATE2 = 0, speaker off
             port_b.write(b);
-            cmd.write(0b10_11_000_0); // channel 2, lobyte/hibyte, mode 0, binary
+            cmd.write(0xb0); // channel 2, lobyte/hibyte, mode 0, binary
             ch2.write(PIT_COUNT as u8);
             ch2.write((PIT_COUNT >> 8) as u8);
 
