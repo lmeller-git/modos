@@ -15,6 +15,9 @@ pub const IST_STACK_SIZE: usize = 5 * 4096; // 20 KiB
 pub const IST_STACK_START: usize = 0xffff_e000_0000_0000;
 pub const MAX_IST_STACKS: usize = (APPROX_KIMAGE_START - IST_STACK_START) / (IST_STACK_SIZE + 4096); // a lot
 
+pub const MMIO_MAX_SIZE: usize = 100 * 4096;
+pub const MMIO_START: usize = 0xffff_f000_0000_0000;
+
 pub const APPROX_KIMAGE_START: usize = 0xffff_ffff_8000_0000;
 
 unsafe extern "C" {

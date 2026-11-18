@@ -1,0 +1,25 @@
+[package]
+name = "kernel-acpi"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# acpi 6.1 cant compile without aml feature.
+# [features]
+# default = ["aml"]
+# aml = ["acpi/aml"]
+
+[dependencies]
+acpi = { version = "6.1.0", default-features = false, features = ["alloc", "aml"] }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = { workspace = true }
+
+[lints]
+workspace = true

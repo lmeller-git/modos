@@ -12,7 +12,6 @@ use limine::{
         FramebufferRequest,
         HhdmRequest,
         MemmapRequest,
-        ModulesRequest,
         MpRequest,
         PagingModeRequest,
         RsdpRequest,
@@ -50,10 +49,6 @@ pub(crate) static PAGING_MODE_REQUEST: PagingModeRequest = PagingModeRequest::ne
     paging::PagingMode::X86_64_4LVL,
     paging::PagingMode::X86_64_4LVL,
 );
-
-#[used]
-#[unsafe(link_section = ".requests")]
-pub(crate) static MODULES_REQUEST: ModulesRequest = ModulesRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]

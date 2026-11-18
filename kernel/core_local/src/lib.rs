@@ -150,14 +150,14 @@ impl<T: CpuLocalData> CoreLocal<T> {
     }
 
     #[inline]
-    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+    pub fn with<'a, R>(&'a self, f: impl FnOnce(&'a T) -> R) -> R {
         // TODO: pin to this core
         let cell = unsafe { &*self.as_ptr() };
         unsafe { f(&*cell.0.get()) }
     }
 
     #[inline]
-    pub fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+    pub fn with_mut<'a, R>(&'a self, f: impl FnOnce(&'a mut T) -> R) -> R {
         // TODO pin to this core and ensure noone else runs concurrently on this core.
         // I.e. disable interrupts.
         // Then this is safe, because only someone runnign on this core can (safely) access this core_local variable
