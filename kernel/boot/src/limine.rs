@@ -15,6 +15,7 @@ use limine::{
         MpRequest,
         PagingModeRequest,
         RsdpRequest,
+        TscFrequencyRequest,
     },
 };
 
@@ -31,20 +32,20 @@ use crate::{
 #[used]
 // The .requests section allows limine to find the requests faster and more safely.
 #[unsafe(link_section = ".requests")]
-pub(crate) static BASE_REVISION: BaseRevision = BaseRevision::new();
+static BASE_REVISION: BaseRevision = BaseRevision::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static BOOT_INFO: BootloaderInfoRequest = BootloaderInfoRequest::new();
+static BOOT_INFO: BootloaderInfoRequest = BootloaderInfoRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
+static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
 
 // Request a paging mode
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static PAGING_MODE_REQUEST: PagingModeRequest = PagingModeRequest::new(
+static PAGING_MODE_REQUEST: PagingModeRequest = PagingModeRequest::new(
     paging::PagingMode::X86_64_4LVL,
     paging::PagingMode::X86_64_4LVL,
     paging::PagingMode::X86_64_4LVL,
@@ -52,28 +53,32 @@ pub(crate) static PAGING_MODE_REQUEST: PagingModeRequest = PagingModeRequest::ne
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static MP_REQUEST: MpRequest = MpRequest::new(MP_FLAG_X2APIC);
+static MP_REQUEST: MpRequest = MpRequest::new(MP_FLAG_X2APIC);
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static MEMORY_MAP_REQUEST: MemmapRequest = MemmapRequest::new();
+static MEMORY_MAP_REQUEST: MemmapRequest = MemmapRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-pub(crate) static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static TSC_REQUEST: TscFrequencyRequest = TscFrequencyRequest::new();
 
 /// Define the start and end markers for Limine requests.
 #[used]
 #[unsafe(link_section = ".requests_start_marker")]
-pub(crate) static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
+static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 
 #[used]
 #[unsafe(link_section = ".requests_end_marker")]
-pub(crate) static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
+static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 pub(crate) fn build_early_bootinfo<'a>() -> EarlyBootInfo<'a> {
     assert!(BASE_REVISION.is_supported());
@@ -88,6 +93,8 @@ pub(crate) fn build_early_bootinfo<'a>() -> EarlyBootInfo<'a> {
     unsafe { core::mem::transmute(response.entries()) },
     );
 
+    let tsc_hz = TSC_REQUEST.response().map(|r| r.frequency);
+
     EarlyBootInfo {
         hhdm_offset: HHDM_REQUEST
             .response()
@@ -97,6 +104,7 @@ pub(crate) fn build_early_bootinfo<'a>() -> EarlyBootInfo<'a> {
             .response()
             .and_then(|response| NonNull::new(response.address)),
         memmap,
+        tsc_hz,
     }
 }
 
@@ -131,6 +139,7 @@ pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInf
             .memmap
             .map(|memap| memap.iter().map(|&&x| x).collect()),
         mp_info,
+        tsc_hz: early_boot.tsc_hz,
     }
 }
 

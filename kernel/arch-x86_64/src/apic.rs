@@ -489,21 +489,28 @@ pub(crate) mod timer {
     ///
     /// # Panics
     /// If the PIT does not respond or yields an implausible frequency.
-    pub(crate) fn init_clock() {
-        BOOT_TSC.store(rdtsc_serialized(), Ordering::Relaxed);
+    pub(crate) fn init_clock(tsc_hz: Option<u64>) {
+        let hz = if let Some(tsc_hz) = tsc_hz {
+            tsc_hz
+        } else {
+            BOOT_TSC.store(rdtsc_serialized(), Ordering::Relaxed);
 
-        if !cpuid::has_invariant_tsc() {
-            serial_println!("[WARN] TSC is not invariant: nanos_since_boot() may drift or jump");
-        }
-        if !cpuid::has_arat() {
-            serial_println!("[WARN] no ARAT: the LAPIC timer may stop in deep C-states");
-        }
+            if !cpuid::has_invariant_tsc() {
+                serial_println!(
+                    "[WARN] TSC is not invariant: nanos_since_boot() may drift or jump"
+                );
+            }
+            if !cpuid::has_arat() {
+                serial_println!("[WARN] no ARAT: the LAPIC timer may stop in deep C-states");
+            }
 
-        let hz = calibrate_tsc_with_pit()
-            .expect("TSC calibration failed: PIT channel 2 did not complete (no usable PIT?)");
-        if !TSC_HZ_RANGE.contains(&hz) {
-            serial_println!("[WARN]: implausible calibrated tsc frequency: {}", hz);
-        }
+            let hz = calibrate_tsc_with_pit()
+                .expect("TSC calibration failed: PIT channel 2 did not complete (no usable PIT?)");
+            if !TSC_HZ_RANGE.contains(&hz) {
+                serial_println!("[WARN]: implausible calibrated tsc frequency: {}", hz);
+            }
+            hz
+        };
         TSC_HZ.store(hz, Ordering::Release);
         serial_println!("[timer] TSC: {} MHz", hz / 1_000_000);
     }

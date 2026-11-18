@@ -594,7 +594,7 @@ pub fn late_init(boot_info: &LateBootInfo) {
 
     idt::init_idt();
 
-    apic::timer::init_clock();
+    apic::timer::init_clock(boot_info.tsc_hz);
 
     let hhdm = boot_info.hhdm_offset.unwrap();
     let rsdp_virt = boot_info.rsdp_addr.unwrap().addr().get();

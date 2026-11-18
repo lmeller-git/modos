@@ -20,6 +20,7 @@ pub struct EarlyBootInfo<'a> {
     pub bootloader_info: Option<BootLoaderInfo<'a>>,
     pub rsdp_addr: Option<NonNull<()>>,
     pub memmap: Option<&'a [&'a Entry]>,
+    pub tsc_hz: Option<u64>,
 }
 
 impl<'a> EarlyBootInfo<'a> {
@@ -34,6 +35,7 @@ pub struct LateBootInfo {
     pub rsdp_addr: Option<NonNull<()>>,
     pub memmap: Option<Box<[Entry]>>,
     pub mp_info: Option<MpBootInfo>,
+    pub tsc_hz: Option<u64>,
 }
 
 unsafe impl Send for LateBootInfo {}
