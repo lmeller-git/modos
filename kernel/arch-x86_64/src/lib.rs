@@ -37,7 +37,10 @@ use core_local::allocate_cls_block;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
 use platform::interface::serial::SerialWriterCapability;
 use x86_64::{
-    instructions::interrupts::{self, without_interrupts},
+    instructions::{
+        interrupts::{self, without_interrupts},
+        port::Port,
+    },
     registers::{
         control::{Cr0, Cr3, Cr4, Cr4Flags},
         model_specific::{GsBase, Msr},
@@ -58,6 +61,7 @@ use x86_64::{
 use crate::{
     frame::X86FrameAllocView,
     gdt::{build_gdt, build_tss, load_gdt_tss},
+    idt::InterruptIndex,
 };
 
 mod acpi;
@@ -379,8 +383,6 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     GsBase::write(my_data_ptr);
 
     unsafe { apic::init_ap() };
-    interrupts::enable();
-    apic::enable_timer();
 
     state.store(true, Ordering::Release);
     while !gate.load(Ordering::Acquire) {
@@ -389,6 +391,9 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
 
     drop(state);
     drop(gate);
+
+    interrupts::enable();
+    apic::enable_timer();
 
     (entry)()
 }
@@ -557,15 +562,16 @@ fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
 }
 
 pub fn late_init(boot_info: &LateBootInfo) {
+    let fallback_bsp = BootCpu {
+        logical_id: 0,
+        hw_id: apic::cpuid::initial_apic_id() as _,
+        is_bsp: true,
+    };
     let my_cpu = boot_info
         .mp_info
         .as_ref()
         .and_then(|info| info.cpus.iter().find(|cpu| cpu.is_bsp))
-        .unwrap_or(&BootCpu {
-            logical_id: 0,
-            hw_id: 0, // TODO
-            is_bsp: true,
-        });
+        .unwrap_or(&fallback_bsp);
 
     let cpus = Box::leak(
         boot_info
@@ -588,16 +594,51 @@ pub fn late_init(boot_info: &LateBootInfo) {
 
     idt::init_idt();
 
-    kernel_acpi::BOOT_TSC.store(apic::timer::rdtsc_serialized(), Ordering::Relaxed);
+    apic::timer::init_clock();
 
-    let config = kernel_acpi::parse(
-        boot_info.hhdm_offset.unwrap(),
-        boot_info.rsdp_addr.unwrap().addr().get() - boot_info.hhdm_offset.unwrap(),
-    );
+    let hhdm = boot_info.hhdm_offset.unwrap();
+    let rsdp_virt = boot_info.rsdp_addr.unwrap().addr().get();
+    let rsdp_phys = rsdp_virt.checked_sub(hhdm).unwrap();
 
-    apic::init_bsp(&config);
+    let config =
+        unsafe { kernel_acpi::parse(hhdm, rsdp_phys, apic::timer::nanos_since_boot) }.unwrap();
+
+    let bsp_id = unsafe { apic::init_bsp(&config) };
+    if bsp_id != my_cpu.hw_id as u32 {
+        serial_println!(
+            "[WARN] BSP APIC ID {} != bootloader hw_id {}",
+            bsp_id,
+            my_cpu.hw_id
+        );
+    }
+
+    // TODO move later when drivers get online
+    init_keyboard_irq(bsp_id);
+
     interrupts::enable();
     apic::enable_timer();
+}
+
+// TODO: these should live in keyboard drivers
+fn init_keyboard_irq(bsp_id: u32) {
+    apic::ioapic::IoApicManager::global().route_isa_irq(
+        1,
+        InterruptIndex::Keyboard as u8,
+        bsp_id,
+        false,
+    );
+    drain_i8042();
+}
+
+fn drain_i8042() {
+    let mut status = Port::<u8>::new(0x64);
+    let mut data = Port::<u8>::new(0x60);
+    for _ in 0..16 {
+        if unsafe { status.read() } & 1 == 0 {
+            break;
+        }
+        let _ = unsafe { data.read() };
+    }
 }
 
 fn init_xmm() {

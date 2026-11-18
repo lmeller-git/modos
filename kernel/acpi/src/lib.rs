@@ -2,25 +2,30 @@
 
 extern crate alloc;
 
+#[cfg(not(target_arch = "x86_64"))]
+compile_error!("kernel_acpi currently only supports x86)64");
+
+// TODO delegate the actual arch specific parser to arch specific crates via capabilities.
+
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicU64;
 
 use acpi::{
+    AcpiError,
     AcpiTables,
     platform::{
         AcpiPlatform,
         InterruptModel,
-        interrupt::{Apic, NmiLine, NmiSource},
+        interrupt::{Apic, LocalInterruptLine, NmiProcessor},
     },
     sdt::madt::{Polarity, TriggerMode},
 };
 
-use crate::handler::KernelAcpiHandler;
-
 mod handler;
+pub use handler::KernelAcpiHandler;
 
-pub static TSC_HZ: AtomicU64 = AtomicU64::new(0);
-pub static BOOT_TSC: AtomicU64 = AtomicU64::new(0);
+/// Clock that returns nanoseconds ince boots.
+/// This function may reutrn anything before the arch `late_init` is done, i.e. before the arch has initialized its timers correctly.
+pub type NanosFn = fn() -> u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IoApicInfo {
@@ -37,35 +42,138 @@ pub struct IsaOverride {
     pub level: bool,
 }
 
+/// A processor as described by the MADT.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpuInfo {
+    /// ACPI processor UID (nmi)
+    pub uid: u32,
+    /// Local APIC ID
+    pub apic_id: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NmiTarget {
+    All,
+    Uid(u32),
+}
+
+/// "LINT`lint` of `target` is wired to NMI."
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LapicNmi {
+    pub target: NmiTarget,
+    /// 0 for LINT0, 1 for LINT1.
+    pub lint: u8,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct LapicNmiTable {
+    pub cpus: Vec<CpuInfo>,
+    pub lines: Vec<LapicNmi>,
+}
+
+impl LapicNmiTable {
+    /// Which of `[LINT0, LINT1]` must be configured as NMI on the core with this APIC ID.
+    pub fn lints_for(&self, apic_id: u32) -> [bool; 2] {
+        let uid = self
+            .cpus
+            .iter()
+            .find(|c| c.apic_id == apic_id)
+            .map(|c| c.uid);
+
+        let mut out = [false; 2];
+        for line in &self.lines {
+            let applies = match line.target {
+                NmiTarget::All => true,
+                NmiTarget::Uid(u) => uid == Some(u),
+            };
+            if applies && let Some(slot) = out.get_mut(line.lint as usize) {
+                *slot = true;
+            }
+        }
+        out
+    }
+}
+
 pub struct InterruptConfig {
     pub lapic_phys: u64,
-    pub lapic_nmi_lines: Vec<NmiLine>,
-    pub nmi_souces: Vec<NmiSource>,
+    pub lapic_nmi: LapicNmiTable,
     pub ioapics: Vec<IoApicInfo>,
     pub overrides: Vec<IsaOverride>,
     pub has_legacy_pic: bool,
 }
 
-pub fn parse(hhdm: usize, rsdp_phys: usize) -> InterruptConfig {
-    let handler = KernelAcpiHandler::new(hhdm);
-    let tables = unsafe { AcpiTables::from_rsdp(handler, rsdp_phys) }.unwrap();
-    let platform = AcpiPlatform::new(tables, handler).unwrap();
-
-    match platform.interrupt_model {
-        InterruptModel::Apic(apic) => apic_parse(apic),
-        _ => todo!(),
-    }
+#[derive(Debug)]
+pub enum ParseError {
+    Tables(AcpiError),
+    Platform(AcpiError),
+    /// The firmware describes no APIC interrupt model (PIC-only machine).
+    NoApic,
 }
 
-fn apic_parse(apic: Apic) -> InterruptConfig {
+/// # Safety
+///
+/// `rsdp_phys` must be the physical address of a valid RSDP and all tables it references must be
+/// readable through the HHDM at `hhdm`.
+pub unsafe fn parse(
+    hhdm: usize,
+    rsdp_phys: usize,
+    nanos_since_boot: NanosFn,
+) -> Result<InterruptConfig, ParseError> {
+    let handler = KernelAcpiHandler::new(hhdm, nanos_since_boot);
+    let tables =
+        unsafe { AcpiTables::from_rsdp(handler, rsdp_phys) }.map_err(ParseError::Tables)?;
+    let AcpiPlatform {
+        interrupt_model,
+        processor_info,
+        ..
+    } = AcpiPlatform::new(tables, handler).map_err(ParseError::Platform)?;
+
+    let InterruptModel::Apic(apic) = interrupt_model else {
+        return Err(ParseError::NoApic);
+    };
+
+    let cpus = processor_info
+        .map(|info| {
+            core::iter::once(info.boot_processor)
+                .chain(info.application_processors.iter().copied())
+                .map(|p| CpuInfo {
+                    uid: p.processor_uid,
+                    apic_id: p.local_apic_id,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(apic_parse(apic, cpus))
+}
+
+fn apic_parse(apic: Apic, cpus: Vec<CpuInfo>) -> InterruptConfig {
+    // NOTE: `apic.nmi_sources` is currently ignored as its unused.
     InterruptConfig {
         lapic_phys: apic.local_apic_address,
+        lapic_nmi: LapicNmiTable {
+            cpus,
+            lines: apic
+                .local_apic_nmi_lines
+                .iter()
+                .map(|n| LapicNmi {
+                    target: match n.processor {
+                        NmiProcessor::All => NmiTarget::All,
+                        NmiProcessor::ProcessorUid(u) => NmiTarget::Uid(u),
+                    },
+                    lint: match n.line {
+                        LocalInterruptLine::Lint0 => 0,
+                        LocalInterruptLine::Lint1 => 1,
+                    },
+                })
+                .collect(),
+        },
         ioapics: apic
             .io_apics
             .iter()
             .map(|io| IoApicInfo {
                 id: io.id,
-                phys: io.address as u64,
+                phys: u64::from(io.address),
                 gsi_base: io.global_system_interrupt_base,
             })
             .collect(),
@@ -80,22 +188,5 @@ fn apic_parse(apic: Apic) -> InterruptConfig {
             })
             .collect(),
         has_legacy_pic: apic.also_has_legacy_pics,
-        nmi_souces: apic.nmi_sources,
-        lapic_nmi_lines: apic.local_apic_nmi_lines,
-    }
-}
-
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
     }
 }

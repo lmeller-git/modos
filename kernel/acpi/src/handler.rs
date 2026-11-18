@@ -1,66 +1,32 @@
-use core::{
-    ptr::NonNull,
-    sync::atomic::{AtomicU64, Ordering},
-};
+#![expect(clippy::todo)]
+
+// TODO: currently just uses the bootloaders hhdm. Write back MMIO will need uncached mapping equivalent to apic setup.
+
+use core::{hint::spin_loop, ptr::NonNull};
 
 use acpi::{Handler, PciAddress, PhysicalMapping};
-#[cfg(target_arch = "x86_64")]
-use x86_64::instructions::port;
-use x86_64::structures::port::{PortRead, PortWrite};
+use x86_64::instructions::port::Port;
 
-use crate::{BOOT_TSC, TSC_HZ};
-
-struct Port<T>(#[cfg(target_arch = "x86_64")] port::Port<T>);
-
-impl<T> Port<T> {
-    fn new(port: u16) -> Self {
-        #[cfg(target_arch = "x86_64")]
-        Self(port::Port::new(port))
-    }
-}
-
-impl<T: PortRead> Port<T> {
-    unsafe fn read(&mut self) -> T {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            self.0.read()
-        }
-    }
-}
-
-impl<T: PortWrite> Port<T> {
-    unsafe fn write(&mut self, v: T) {
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            self.0.write(v);
-        }
-    }
-}
+use crate::NanosFn;
 
 #[derive(Clone, Copy)]
 pub struct KernelAcpiHandler {
     hhdm: usize,
+    nanos_since_boot: NanosFn,
 }
 
 impl KernelAcpiHandler {
-    pub const fn new(hhdm: usize) -> Self {
-        Self { hhdm }
+    pub const fn new(hhdm: usize, nanos_since_boot: NanosFn) -> Self {
+        Self {
+            hhdm,
+            nanos_since_boot,
+        }
     }
 
     #[inline]
     fn virt(&self, phys: usize) -> usize {
-        phys + self.hhdm
-    }
-}
-
-#[inline]
-fn rdtsc() -> u64 {
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        core::arch::x86_64::_mm_lfence();
-        let t = core::arch::x86_64::_rdtsc();
-        core::arch::x86_64::_mm_lfence();
-        t
+        phys.checked_add(self.hhdm)
+            .expect("ACPI physical address overflows the HHDM")
     }
 }
 
@@ -70,6 +36,10 @@ impl Handler for KernelAcpiHandler {
         physical_address: usize,
         size: usize,
     ) -> PhysicalMapping<Self, T> {
+        // TODO callback into arch for proper mapping. Needs indirection again.
+        physical_address
+            .checked_add(size)
+            .expect("ACPI region wraps the physical address space");
         let virt = NonNull::new(self.virt(physical_address) as *mut T).expect("null ACPI mapping");
         PhysicalMapping {
             physical_start: physical_address,
@@ -138,6 +108,8 @@ impl Handler for KernelAcpiHandler {
         unsafe { Port::<u32>::new(p).write(v) }
     }
 
+    // needs MCFG/ECAM.
+    // TODO implement with PCI system
     fn read_pci_u8(&self, _a: PciAddress, _o: u16) -> u8 {
         todo!("ACPI: PCI config read")
     }
@@ -163,22 +135,21 @@ impl Handler for KernelAcpiHandler {
     }
 
     fn nanos_since_boot(&self) -> u64 {
-        let hz = TSC_HZ.load(Ordering::Relaxed);
-        debug_assert!(hz != 0, "Need to calibrate TSC");
-        let ticks = rdtsc().wrapping_sub(BOOT_TSC.load(Ordering::Relaxed));
-        ((ticks as u128 * 1_000_000_000) / hz as u128) as u64
+        (self.nanos_since_boot)()
     }
 
     fn stall(&self, microseconds: u64) {
-        let end = self.nanos_since_boot() + microseconds * 1_000;
+        let end = self
+            .nanos_since_boot()
+            .saturating_add(microseconds.saturating_mul(1_000));
         while self.nanos_since_boot() < end {
-            core::hint::spin_loop();
+            spin_loop();
         }
     }
 
     fn sleep(&self, milliseconds: u64) {
-        // TODO yield
-        self.stall(milliseconds * 1_000);
+        // TODO: yield to the scheduler
+        self.stall(milliseconds.saturating_mul(1_000));
     }
 
     #[cfg(feature = "aml")]
