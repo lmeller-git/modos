@@ -154,17 +154,17 @@ impl Handler for KernelAcpiHandler {
         self.stall(milliseconds.saturating_mul(1_000));
     }
 
-    #[cfg(feature = "aml")]
+    // #[cfg(feature = "aml")]
     fn create_mutex(&self) -> acpi::Handle {
         todo!("AML mutex")
     }
 
-    #[cfg(feature = "aml")]
+    // #[cfg(feature = "aml")]
     fn acquire(&self, _m: acpi::Handle, _timeout: u16) -> Result<(), acpi::aml::AmlError> {
         todo!("AML mutex")
     }
 
-    #[cfg(feature = "aml")]
+    // #[cfg(feature = "aml")]
     fn release(&self, _m: acpi::Handle) {
         todo!("AML mutex")
     }
