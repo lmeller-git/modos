@@ -1,5 +1,7 @@
 #![no_std]
 
+use core::fmt::Arguments;
+
 pub use platform_interfaces as interface;
 use platform_interfaces::{power::ShutdownCapability, serial::SerialWriterCapability};
 #[cfg(target_arch = "x86_64")]
@@ -13,6 +15,29 @@ pub struct TargetPlatform;
 pub trait SupportedPlatform: ShutdownCapability + SerialWriterCapability {}
 
 impl SupportedPlatform for TargetPlatform {}
+
+#[macro_export]
+macro_rules! serial_println {
+    () => {
+        $crate::serial_print!("\n")
+    };
+    ($($arg:tt)*) => {
+        $crate::serial_print!("{}\n", format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! serial_print {
+    () => {};
+    ($($arg:tt)*) => {
+        $crate::_serial_print(format_args!("\x1b[34m[KINFO]\x1b[0m {}", format_args!($($arg)*)))
+    };
+}
+
+#[doc(hidden)]
+pub fn _serial_print(args: Arguments<'_>) {
+    TargetPlatform::write_fmt(args).unwrap();
+}
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right

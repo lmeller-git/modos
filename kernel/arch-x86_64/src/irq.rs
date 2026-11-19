@@ -1,11 +1,12 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use platform::serial_println;
 use x86_64::{
     instructions::port::Port,
     structures::idt::{InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{apic::lapic::end_interrupt, serial_println};
+use crate::apic::lapic::end_interrupt;
 
 static TOTAL_TIMER_TICKS: AtomicU64 = AtomicU64::new(0);
 

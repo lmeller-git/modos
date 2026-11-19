@@ -1,7 +1,5 @@
 #![no_std]
 
-pub mod mm;
-
 // we reexport arch-interfaces, such that consumers doont have to depend on both crates always
 pub use arch_interfaces as interface;
 use arch_interfaces::{

@@ -11,9 +11,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-derive_more = { workspace = true }
-bitflags = { workspace = true }
-thiserror = { workspace = true }
 arch-interfaces = { path = "../arch-interfaces" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
