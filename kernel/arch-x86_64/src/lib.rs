@@ -63,14 +63,12 @@ use crate::{
     idt::InterruptIndex,
 };
 
-mod acpi;
 mod apic;
 pub(crate) mod frame;
 mod gdt;
 mod idt;
 mod irq;
 pub(crate) mod page;
-mod pic;
 
 /// Capability provider for x86_64 targets
 pub struct X86_64;

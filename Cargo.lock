@@ -180,14 +180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "executor"
-version = "0.1.0"
-
-[[package]]
-name = "instrument"
-version = "0.1.0"
-
-[[package]]
 name = "irq"
 version = "0.1.0"
 dependencies = [
@@ -246,10 +238,6 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "mem-layout"
-version = "0.1.0"
-
-[[package]]
-name = "memory"
 version = "0.1.0"
 
 [[package]]
@@ -459,10 +447,6 @@ name = "volatile"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
-
-[[package]]
-name = "watchdog"
-version = "0.1.0"
 
 [[package]]
 name = "x2apic"
