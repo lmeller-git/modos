@@ -5,7 +5,6 @@ extern crate alloc;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
-    fmt::Arguments,
     hint::spin_loop,
     mem::ManuallyDrop,
     ptr::{NonNull, null},
@@ -35,7 +34,7 @@ use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, m
 use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
-use platform::interface::serial::SerialWriterCapability;
+use platform::serial_println;
 use x86_64::{
     instructions::{
         interrupts::{self, without_interrupts},
@@ -66,13 +65,12 @@ use crate::{
 
 mod acpi;
 mod apic;
-pub mod frame;
+pub(crate) mod frame;
 mod gdt;
 mod idt;
 mod irq;
-pub mod page;
+pub(crate) mod page;
 mod pic;
-mod qemu;
 
 /// Capability provider for x86_64 targets
 pub struct X86_64;
@@ -147,7 +145,7 @@ struct BSPReleaseData {
 }
 
 #[derive(Clone, Debug)]
-pub struct APBringupSync {
+struct APBringupSync {
     cores: Vec<Arc<AtomicBool>>,
     gate: Arc<AtomicBool>,
 }
@@ -528,11 +526,7 @@ impl InterruptHandlingCapability for X86_64 {
     }
 }
 
-pub fn exit(code: usize) -> ! {
-    qemu::exit_qemu(qemu::QemuExitCode::from_usize(code));
-}
-
-pub fn early_init(boot_info: &EarlyBootInfo<'_>) {
+fn early_init(boot_info: &EarlyBootInfo<'_>) {
     page::init_pagetable(boot_info.hhdm_offset.unwrap());
     frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
     init_xmm();
@@ -561,7 +555,7 @@ fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
     my_data
 }
 
-pub fn late_init(boot_info: &LateBootInfo) {
+fn late_init(boot_info: &LateBootInfo) {
     let fallback_bsp = BootCpu {
         logical_id: 0,
         hw_id: apic::cpuid::initial_apic_id() as _,
@@ -648,27 +642,6 @@ fn init_xmm() {
             cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
         });
     }
-}
-
-fn _serial_print(args: Arguments<'_>) {
-    platform::TargetPlatform::write_fmt(args).unwrap();
-}
-
-#[macro_export]
-macro_rules! serial_println {
-    () => {
-        $crate::serial_print!("\n")
-    };
-    ($($arg:tt)*) => {
-        $crate::serial_print!("{}\n", format_args!($($arg)*))
-    };
-}
-#[macro_export]
-macro_rules! serial_print {
-    () => {};
-    ($($arg:tt)*) => {
-        $crate::_serial_print(format_args!("\x1b[34m[KINFO]\x1b[0m {}", format_args!($($arg)*)))
-    };
 }
 
 pub fn add(left: u64, right: u64) -> u64 {

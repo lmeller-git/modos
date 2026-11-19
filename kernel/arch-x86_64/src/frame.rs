@@ -17,8 +17,8 @@ pub(crate) fn init_frame_alloc<'a>(memmap: &'a [&'a Entry], hhdm_offset: usize) 
     FRAME_ALLOC.init_once(|| Mutex::new(LinkedListFrameAllocator::new(memmap, hhdm_offset)));
 }
 
-pub fn get_frame_alloc<'a>() -> &'a Mutex<impl FrameAllocator<Size4KiB> + FrameDeallocator<Size4KiB>>
-{
+pub(crate) fn get_frame_alloc<'a>()
+-> &'a Mutex<impl FrameAllocator<Size4KiB> + FrameDeallocator<Size4KiB>> {
     FRAME_ALLOC.get().unwrap()
 }
 
@@ -171,7 +171,7 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
     }
 }
 
-pub struct X86FrameAllocView<'a, A>(pub(crate) &'a mut A);
+pub(crate) struct X86FrameAllocView<'a, A>(pub(crate) &'a mut A);
 
 impl<'a, A> arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>
     for X86FrameAllocView<'a, A>

@@ -5,13 +5,14 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use kernel_acpi::InterruptConfig;
 use mem_layout::{MMIO_MAX_SIZE, MMIO_START};
+use platform::serial_println;
 use x86_64::{
     PhysAddr,
     VirtAddr,
     structures::paging::{Mapper, Page, PageSize, PageTableFlags, PhysFrame, Size4KiB},
 };
 
-use crate::{frame::get_frame_alloc, page::get_pagetable, serial_println};
+use crate::{frame::get_frame_alloc, page::get_pagetable};
 
 const TICK_PERIOD_MS: u32 = 10;
 
@@ -106,11 +107,12 @@ pub(crate) mod lapic {
     use conquer_once::spin::OnceCell;
     use core_local::CLSLazyPtr;
     use kernel_acpi::LapicNmiTable;
+    use platform::serial_println;
     use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
     use x86_64::{PhysAddr, VirtAddr, instructions::interrupts, registers::model_specific::Msr};
 
     use super::{cpuid, map_no_cache};
-    use crate::{idt::InterruptIndex, serial_println};
+    use crate::idt::InterruptIndex;
 
     pub(super) const TIMER_DIVIDE: TimerDivide = TimerDivide::Div16;
 
@@ -448,6 +450,7 @@ pub(crate) mod timer {
         sync::atomic::{AtomicU32, AtomicU64, Ordering},
     };
 
+    use platform::serial_println;
     use x2apic::lapic::{LocalApic, TimerMode};
     use x86_64::instructions::port::Port;
 
@@ -455,7 +458,6 @@ pub(crate) mod timer {
         cpuid,
         lapic::{TIMER_DIVIDE, with_lapic},
     };
-    use crate::serial_println;
 
     const PIT_HZ: u64 = 1_193_182;
     const TSC_CAL_MS: u64 = 10;

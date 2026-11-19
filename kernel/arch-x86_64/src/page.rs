@@ -8,7 +8,7 @@ use x86_64::{
 
 pub(crate) static PAGETABLE: OnceCell<Mutex<OffsetPageTable<'static>>> = OnceCell::uninit();
 
-pub fn get_pagetable<'a>() -> &'a Mutex<OffsetPageTable<'static>> {
+pub(crate) fn get_pagetable<'a>() -> &'a Mutex<OffsetPageTable<'static>> {
     PAGETABLE.get().unwrap()
 }
 

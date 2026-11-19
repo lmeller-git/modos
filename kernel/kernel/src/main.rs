@@ -12,10 +12,10 @@ use arch::interface::{
     cpu::{CpuDataCapability, SmpCapability},
     init::InitCapability,
 };
-use kernel::serial_println;
 use platform::{
     TargetPlatform,
     interface::power::{ExitCode, ShutdownCapability},
+    serial_println,
 };
 
 #[unsafe(no_mangle)]
