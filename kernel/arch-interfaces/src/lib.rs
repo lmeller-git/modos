@@ -3,7 +3,6 @@
 pub mod cpu;
 pub mod init;
 pub mod interrupt;
-pub mod irq;
 pub mod mm;
 
 pub fn add(left: u64, right: u64) -> u64 {

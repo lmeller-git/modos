@@ -5,9 +5,8 @@
 use core::{hint::spin_loop, ptr::NonNull};
 
 use acpi::{Handler, PciAddress, PhysicalMapping};
+use platform_interfaces::interrupt::NanosFn;
 use x86_64::instructions::port::Port;
-
-use crate::NanosFn;
 
 // TODO currently read/write volatile do not respect alignment. We may want to check alignment before raw volatile rw.
 

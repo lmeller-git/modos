@@ -18,6 +18,7 @@ test = false
 boot = { path = "../boot" }
 arch = { path = "../arch" }
 early_heap = { path = "../early_heap" }
+early-log = { path = "../early-log" }
 platform = { path = "../platform" }
 core_local = { path = "../core_local" }
 

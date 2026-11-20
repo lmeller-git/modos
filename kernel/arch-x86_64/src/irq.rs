@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use platform::serial_println;
+use early_log::early_println;
 use x86_64::{
     instructions::port::Port,
     structures::idt::{InterruptStackFrame, PageFaultErrorCode},
@@ -27,6 +27,7 @@ pub(super) extern "x86-interrupt" fn timer_interrupt(_stack_frame: InterruptStac
     end_interrupt();
 }
 
+#[expect(dead_code)]
 pub(crate) fn current_tick() -> u64 {
     TOTAL_TIMER_TICKS.load(Ordering::Acquire)
 }
@@ -34,7 +35,7 @@ pub(crate) fn current_tick() -> u64 {
 pub(super) extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let mut port = Port::<u8>::new(0x60);
     let scancode: u8 = unsafe { port.read() };
-    serial_println!("received scancode {}", scancode);
+    early_println!("received scancode {}", scancode);
     end_interrupt();
 }
 
@@ -60,11 +61,11 @@ pub(super) extern "x86-interrupt" fn gpf_handler(
 
 pub(super) extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // nothing to do
-    serial_println!("spurious interrupt");
+    early_println!("spurious interrupt");
     end_interrupt();
 }
 
 pub(super) extern "x86-interrupt" fn error_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    serial_println!("error interrupt");
+    early_println!("error interrupt");
     end_interrupt();
 }

@@ -43,7 +43,7 @@ dependencies = [
  "boot",
  "conquer-once",
  "core_local",
- "kernel-acpi",
+ "early-log",
  "mem-layout",
  "platform",
  "raw-cpuid 11.6.0",
@@ -170,6 +170,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "early-log"
+version = "0.1.0"
+dependencies = [
+ "spin",
+]
+
+[[package]]
 name = "early_heap"
 version = "0.1.0"
 dependencies = [
@@ -194,6 +201,7 @@ dependencies = [
  "arch",
  "boot",
  "core_local",
+ "early-log",
  "early_heap",
  "platform",
 ]
@@ -203,6 +211,7 @@ name = "kernel-acpi"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "platform-interfaces",
  "x86_64",
 ]
 
@@ -275,9 +284,11 @@ dependencies = [
 name = "platform-pc-x86_64"
 version = "0.1.0"
 dependencies = [
+ "kernel-acpi",
  "platform-interfaces",
  "spin",
  "uart_16550",
+ "x2apic",
  "x86_64",
 ]
 

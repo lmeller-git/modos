@@ -12,16 +12,18 @@ use arch::interface::{
     cpu::{CpuDataCapability, SmpCapability},
     init::InitCapability,
 };
+use early_log::early_println;
 use platform::{
     TargetPlatform,
     interface::power::{ExitCode, ShutdownCapability},
-    serial_println,
 };
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
+    early_log::set_sink(platform::_serial_print);
+
     let boot_info = boot::build_bootinfo();
-    serial_println!("Hello there!");
+    early_println!("Hello there!");
 
     let init_once = arch::TargetArch::initialize().unwrap();
 
@@ -30,12 +32,12 @@ unsafe extern "C" fn _start() -> ! {
     early_heap::init(&GLOBAL_ALLOCATOR);
 
     let string = String::from_str("Hello world");
-    serial_println!("We allocated this on the heap: {:?}", string);
+    early_println!("We allocated this on the heap: {:?}", string);
 
     let late_info = boot_info.into_late();
 
     arch::TargetArch::late_init(&init_once, &late_info).unwrap();
-    serial_println!("Completed late init");
+    early_println!("Completed late init");
 
     arch::TargetArch::core_release(init_once, late_info, core_main)
 }
@@ -45,7 +47,7 @@ static CORE_ID: usize = 0;
 
 fn core_main() -> ! {
     let cpu = arch::TargetArch::my_cpu();
-    serial_println!("Hello from cpu {:?}", cpu);
+    early_println!("Hello from cpu {:?}", cpu);
 
     CORE_ID.with_mut(|id| *id = cpu.logical_id);
 
@@ -65,7 +67,7 @@ fn core_main() -> ! {
 #[cfg(not(test))]
 #[panic_handler]
 fn kernel_panic(info: &PanicInfo<'_>) -> ! {
-    serial_println!("Panic: {:?}", info);
+    early_println!("Panic: {:?}", info);
     TargetPlatform::shutdown(ExitCode::Failure)
 }
 

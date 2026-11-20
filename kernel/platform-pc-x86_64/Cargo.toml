@@ -16,6 +16,8 @@ qemu-platform = []
 
 [dependencies]
 platform-interfaces = { path = "../platform-interfaces" }
+kernel-acpi = { path = "../acpi" }
+x2apic = { workspace = true }
 x86_64 = { workspace = true }
 spin = { workspace = true }
 uart_16550 = "0.3.2"

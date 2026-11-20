@@ -1,5 +1,11 @@
 #![no_std]
 
+extern crate alloc;
+
+mod interrupt;
+mod ioapic;
+mod pic;
+
 use core::fmt::Write;
 
 use platform_interfaces::{

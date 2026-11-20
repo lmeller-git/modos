@@ -5,7 +5,7 @@ pub use arch_interfaces as interface;
 use arch_interfaces::{
     cpu::CpuDataCapability,
     init::InitCapability,
-    interrupt::InterruptHandlingCapability,
+    interrupt::InterruptHandlerCapability,
     mm::{
         FrameAllocatorCapability,
         FrameDeallocatorCapability,
@@ -21,7 +21,7 @@ pub struct TargetArch;
 
 pub trait SupportedArch:
     CpuDataCapability
-    + InterruptHandlingCapability
+    + InterruptHandlerCapability
     + FrameAllocatorCapability
     + FrameDeallocatorCapability
     + MemMapperCapability

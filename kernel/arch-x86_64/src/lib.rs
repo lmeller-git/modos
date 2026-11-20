@@ -14,7 +14,7 @@ use core::{
 use arch_interfaces::{
     cpu::{CpuDataCapability, CpuId, SmpCapability},
     init::InitCapability,
-    interrupt::InterruptHandlingCapability,
+    interrupt::InterruptHandlerCapability,
     mm::{
         FlushError,
         FrameAllocatorCapability,
@@ -33,8 +33,9 @@ use arch_x86_64_primitives::{CPUData, Primitive};
 use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
 use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
+use early_log::early_println;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
-use platform::serial_println;
+use platform::{TargetPlatform, interface::interrupt::InterruptControllerCapability};
 use x86_64::{
     instructions::{
         interrupts::{self, without_interrupts},
@@ -68,6 +69,7 @@ pub(crate) mod frame;
 mod gdt;
 mod idt;
 mod irq;
+pub(crate) mod mmio;
 pub(crate) mod page;
 
 /// Capability provider for x86_64 targets
@@ -250,7 +252,7 @@ impl SmpCapability for X86_64 {
         let bsp_cpu: &'static CPUData = unsafe { &*GsBase::read().as_ptr() };
 
         let Some(mp_info) = &boot_info.mp_info else {
-            serial_println!("No smp");
+            early_println!("No smp");
 
             let packet = Box::leak(Box::new(BSPReleaseData {
                 entry,
@@ -262,7 +264,7 @@ impl SmpCapability for X86_64 {
             bsp_release(packet)
         };
 
-        serial_println!("cores: {}", mp_info.cpus.len());
+        early_println!("cores: {}", mp_info.cpus.len());
 
         let cs = capture_cs();
 
@@ -378,7 +380,7 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);
     GsBase::write(my_data_ptr);
 
-    unsafe { apic::init_ap() };
+    apic::init_ap();
 
     state.store(true, Ordering::Release);
     while !gate.load(Ordering::Acquire) {
@@ -510,7 +512,7 @@ impl TLBFlushCapability for X86_64 {
     }
 }
 
-impl InterruptHandlingCapability for X86_64 {
+impl InterruptHandlerCapability for X86_64 {
     fn enable() {
         interrupts::enable();
     }
@@ -593,15 +595,20 @@ fn late_init(boot_info: &LateBootInfo) {
     let rsdp_phys = rsdp_virt.checked_sub(hhdm).unwrap();
 
     let config =
-        unsafe { kernel_acpi::parse(hhdm, rsdp_phys, apic::timer::nanos_since_boot) }.unwrap();
+        unsafe { TargetPlatform::parse_config(hhdm, rsdp_phys, apic::timer::nanos_since_boot) }
+            .expect("failed to discover the platform interrupt topology");
 
-    let bsp_id = unsafe { apic::init_bsp(&config) };
+    let bsp_id = apic::init_bsp(config.lapic_phys, &config.lapic_nmi);
     if bsp_id != my_cpu.hw_id {
-        serial_println!(
+        early_println!(
             "[WARN] BSP APIC ID {} != bootloader hw_id {}",
             bsp_id,
             my_cpu.hw_id
         );
+    }
+
+    unsafe {
+        TargetPlatform::init_interrupt_controllers(&config, bsp_id, mmio::map_mmio);
     }
 
     // TODO move later when drivers get online
@@ -613,12 +620,7 @@ fn late_init(boot_info: &LateBootInfo) {
 
 // TODO: these should live in keyboard drivers
 fn init_keyboard_irq(bsp_id: u32) {
-    apic::ioapic::IoApicManager::global().route_isa_irq(
-        1,
-        InterruptIndex::Keyboard as u8,
-        bsp_id,
-        false,
-    );
+    TargetPlatform::route_isa_irq(1, InterruptIndex::Keyboard as u8, bsp_id, false);
     drain_i8042();
 }
 
