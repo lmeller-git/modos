@@ -27,7 +27,7 @@ make run
 ### Build & Run
 
 Commands:
-* `make` / `make all`: Compiles the kernel and builds the bootable tiny_os.iso image.
+* `make` / `make all`: Compiles the kernel and builds the bootable modos.iso image.
 * `make kernel`: Compiles only the kernel binary without regenerating the ISO.
 * `make run`: Builds the ISO and launches QEMU with UEFI (OVMF) support.
 * `make debug`: Boots in QEMU and pauses execution, listening for GDB on localhost:1234 (-s -S).
