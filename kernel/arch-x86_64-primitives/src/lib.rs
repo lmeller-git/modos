@@ -1,6 +1,10 @@
 #![no_std]
 
-use core::{mem::ManuallyDrop, ptr::NonNull};
+use core::{
+    mem::ManuallyDrop,
+    ptr::NonNull,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 use arch_interfaces::cpu::{CpuDataCapability, CpuId};
 use boot::mp::BootCpu;
@@ -30,6 +34,25 @@ pub struct CPUData {
     pub tss: &'static TaskStateSegment,
     pub cpus: &'static [CpuId],
     pub cls: *const [u8],
+    pub cls_table: &'static [AtomicPtr<u8>],
+}
+
+impl CPUData {
+    /// Makes this core's cls visible to other cores.
+    pub fn publish_cls(&self) {
+        let idx = cpu_index(self.cpus, self.cpu.logical_id)
+            .expect("core is not part of its own cpu list");
+        self.cls_table[idx].store(self.cls.cast::<u8>().cast_mut(), Ordering::Release);
+    }
+}
+
+/// Position of `id` in `cpus`.
+fn cpu_index(cpus: &[CpuId], id: CpuId) -> Option<usize> {
+    // dense, sorted logical ids
+    if cpus.get(id.value()) == Some(&id) {
+        return Some(id.value());
+    }
+    cpus.iter().position(|&cpu| cpu == id)
 }
 
 pub fn my_cpu() -> &'static CPUData {
@@ -47,6 +70,13 @@ impl CpuDataCapability for Primitive {
 
     fn public_data_base() -> *const () {
         my_cpu().cls.cast()
+    }
+
+    fn public_data_base_of(cpu: CpuId) -> Option<*const ()> {
+        let this = my_cpu();
+        let idx = cpu_index(this.cpus, cpu)?;
+        let base = this.cls_table[idx].load(Ordering::Acquire);
+        (!base.is_null()).then_some(base.cast_const().cast())
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {

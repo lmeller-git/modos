@@ -11,6 +11,11 @@ pub trait CpuDataCapability {
     fn my_cpu() -> BootCpu;
     /// Returns the base address at which this cores public data is stored.
     fn public_data_base() -> *const ();
+    /// Returns the base address at which the public data of `cpu` is stored.
+    ///
+    /// Returns `None` if `cpu` is unknown or has not published its data yet.
+    /// The returned base stays valid for the rest of the kernel's lifetime.
+    fn public_data_base_of(cpu: CpuId) -> Option<*const ()>;
 }
 
 pub trait SmpCapability {

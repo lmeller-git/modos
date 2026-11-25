@@ -7,8 +7,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
     hint::spin_loop,
     mem::ManuallyDrop,
-    ptr::{NonNull, null},
-    sync::atomic::{AtomicBool, Ordering},
+    ptr::{self, NonNull, null},
+    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
 };
 
 use arch_interfaces::{
@@ -113,6 +113,10 @@ impl CpuDataCapability for X86_64 {
 
     fn public_data_base() -> *const () {
         Primitive::public_data_base()
+    }
+
+    fn public_data_base_of(cpu: CpuId) -> Option<*const ()> {
+        Primitive::public_data_base_of(cpu)
     }
 
     fn cpus() -> impl Iterator<Item = CpuId> {
@@ -238,8 +242,6 @@ impl SmpCapability for X86_64 {
         //
         // I.e. we build a CPUStartupData, pass it to the start_cpu() function of the next core, who will then switch stack, install important structures and busy wait.
 
-        // for this we actuallly need to share some atomic flags, gotta think about dataflow here
-
         let comm = comm_init(&boot_info);
         let bsp_cpu: &'static CPUData = unsafe { &*GsBase::read().as_ptr() };
 
@@ -266,7 +268,7 @@ impl SmpCapability for X86_64 {
             .filter(|core| !core.is_bsp)
             .zip(comm.cores.iter())
         {
-            let data = build_cpu(cpu, bsp_cpu.cpus);
+            let data = build_cpu(cpu, bsp_cpu.cpus, bsp_cpu.cls_table);
 
             let my_packet = Box::leak(Box::new(CPUStartupData {
                 data,
@@ -370,6 +372,7 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
 
     let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);
     GsBase::write(my_data_ptr);
+    data.publish_cls();
 
     idt::IDT.get().unwrap().load();
 
@@ -529,7 +532,11 @@ fn early_init(boot_info: &EarlyBootInfo<'_>) {
     init_xmm();
 }
 
-fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
+fn build_cpu(
+    cpu: &BootCpu,
+    cpus: &'static [CpuId],
+    cls_table: &'static [AtomicPtr<u8>],
+) -> &'static mut CPUData {
     let bsp_stack = build_core_stack(cpu.logical_id.value());
     let tss = build_tss(cpu.logical_id.value());
     let tss = Box::leak(Box::new(tss));
@@ -545,6 +552,7 @@ fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
         tss,
         cpus,
         cls,
+        cls_table,
     };
 
     let my_data = Box::leak(Box::new(my_data));
@@ -577,10 +585,19 @@ fn late_init(boot_info: &LateBootInfo) {
             .unwrap_or([CpuId::new(0)].into()),
     );
 
-    let my_data = build_cpu(my_cpu, cpus);
+    cpus.sort_unstable();
+
+    let cls_table: &'static [AtomicPtr<u8>] = Box::leak(
+        cpus.iter()
+            .map(|_| AtomicPtr::new(ptr::null_mut()))
+            .collect::<Box<_>>(),
+    );
+
+    let my_data = build_cpu(my_cpu, cpus, cls_table);
     let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
 
     GsBase::write(my_data_ptr);
+    my_data.publish_cls();
     load_gdt_tss(&my_data.gdt, &my_data.selectors);
 
     idt::init_idt();
