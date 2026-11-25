@@ -1,7 +1,7 @@
 //! lapic bring-up and lapic timer.
 
 use early_log::early_println;
-use platform::interface::interrupt::LapicNmiTable;
+use irq_interfaces::x86::LapicNmiTable;
 use x86_64::instructions::interrupts;
 
 const TICK_PERIOD_MS: u32 = 10;
@@ -45,8 +45,12 @@ pub(crate) mod lapic {
     use conquer_once::spin::OnceCell;
     use core_local::CLSLazyPtr;
     use early_log::early_println;
-    use platform::interface::interrupt::{LapicNmi, LapicNmiTable};
-    use x2apic::lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
+    use irq_interfaces::{
+        Polarity,
+        TriggerMode,
+        x86::{LapicNmi, LapicNmiTable},
+    };
+    use x2apic::lapic::{ErrorFlags, LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
     use x86_64::{PhysAddr, VirtAddr, instructions::interrupts, registers::model_specific::Msr};
 
     use super::cpuid;
@@ -61,8 +65,10 @@ pub(crate) mod lapic {
     /// xapic MMIO register offsets.
     mod reg {
         pub(crate) const TPR: u32 = 0x080;
+        pub(crate) const ERROR: u32 = 0x280;
         pub(crate) const LVT_LINT0: u32 = 0x350;
         pub(crate) const LVT_LINT1: u32 = 0x360;
+        pub(crate) const LVT_ERROR: u32 = 0x370;
     }
 
     /// LVT entry: delivery mode NMI (100b), unmasked.
@@ -72,10 +78,10 @@ pub(crate) mod lapic {
 
     fn lvt_nmi_value(nmi: LapicNmi) -> u32 {
         let mut val = LVT_NMI_BASE;
-        if nmi.active_low {
+        if nmi.polarity == Polarity::ActiveLow {
             val |= LVT_PIN_POLARITY_LOW;
         }
-        if nmi.level {
+        if nmi.trigger == TriggerMode::Level {
             val |= LVT_TRIGGER_LEVEL;
         }
         val
@@ -150,6 +156,9 @@ pub(crate) mod lapic {
             // Also masks LINT0/LINT1 and the timer.
             lapic.enable();
             lapic.disable_timer();
+            // The LVT error entry is masked at reset. Unmask it now that the IDT
+            // has an error handler; that handler clears the ESR before EOI.
+            write_reg(reg::LVT_ERROR, u32::from(InterruptIndex::Error as u8));
         }
         let id = unsafe { lapic.id() };
 
@@ -186,6 +195,13 @@ pub(crate) mod lapic {
     #[inline]
     pub(crate) fn end_interrupt() {
         with_lapic(|l| unsafe { l.end_of_interrupt() });
+    }
+
+    /// Reads and clears the local APIC error status register.
+    pub(crate) fn take_error_flags() -> ErrorFlags {
+        let flags = with_lapic(|l| unsafe { l.error_flags() });
+        unsafe { write_reg(reg::ERROR, 0) };
+        flags
     }
 }
 

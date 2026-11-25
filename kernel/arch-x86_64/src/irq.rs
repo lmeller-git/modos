@@ -1,147 +1,132 @@
-use alloc::boxed::Box;
 use core::{
-    ops::Index,
-    sync::atomic::{AtomicPtr, AtomicU64, Ordering},
+    ops::Range,
+    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 
-use arch_interfaces::interrupt::IrqHandler;
-use core_local::CLSLazyPtr;
+use arch_interfaces::{
+    cpu::CpuDataCapability,
+    interrupt::{Affinity, IrqDeliveryCapability, IrqError, IrqNum, IrqTarget},
+};
 use early_log::early_println;
-use spin::Mutex;
+use spin::{Mutex, Once};
 use x86_64::{
     instructions::interrupts,
     structures::idt::{InterruptStackFrame, PageFaultErrorCode},
 };
 
-use crate::{apic::lapic::end_interrupt, idt::InterruptIndex};
+use crate::{X86_64, apic::lapic::end_interrupt};
 
-const RESERVED_IRQ: [u8; 3] = [
-    InterruptIndex::Timer as u8,
-    InterruptIndex::Error as u8,
-    InterruptIndex::Spurious as u8,
-];
+/// Marks a vector no irq is bound to.
+const UNBOUND: u32 = u32::MAX;
 
-#[core_local::core_local]
-pub(crate) static IRQ_CONTROLLER: CLSLazyPtr<CoreIrqTable> = CLSLazyPtr::new();
+// TODO: ENTRY and VECTOR_IRQ, ... should be core_local. Needs cross core core_local access.
 
-pub(crate) extern "x86-interrupt" fn irq_dispatch<const VEC: u8>(_f: InterruptStackFrame) {
-    if !IRQ_CONTROLLER.with(|c| c.get().unwrap().dispatch(VEC)) {
-        early_println!("[irq] Unhandled interrupt: {:#x}", VEC);
-    }
-    end_interrupt();
+/// Vector -> irq. Currently globa.
+static VECTOR_IRQ: [AtomicU32; 256] = [const { AtomicU32::new(UNBOUND) }; 256];
+
+/// The core's entry point, installed once by `irq`.
+static ENTRY: Once<fn(IrqNum)> = Once::new();
+
+// TODO: use an atomic map
+/// Vectors handed out by [`IrqDeliveryCapability::alloc_target`]. Currently global like [`VECTOR_IRQ`].
+static VECTORS: Mutex<VectorMap> = Mutex::new(VectorMap::new());
+
+/// [`Affinity::Any`] scheduler.
+static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
+
+/// First and last vector available to external interrupts.
+/// `0x00..=0x1F`: exceptions,
+/// `0x20`/`0x21`: local APIC timer / error entries,
+/// `0xFF`: spurious entry.
+const EXTERNAL_RANGE: Range<usize> = 0x22..0xFF;
+
+/// valid external vector.
+const fn is_external(vector: usize) -> bool {
+    EXTERNAL_RANGE.contains(&vector) && !(vector >= 0xE0 && vector <= 0xEF)
 }
 
-struct IrqAction {
-    handler: &'static dyn IrqHandler,
-}
+/// Bitmap of vectors. A set bit is in use or not available to external interrupts.
+struct VectorMap([u64; 4]);
 
-struct Bitmap {
-    used: [u64; 4],
-}
-
-impl Bitmap {
+impl VectorMap {
     const fn new() -> Self {
-        let mut used = [0u64; 4];
-        used[0] = 0x0000_0000_FFFF_FFFF; // 0x00..=0x1F CPU exceptions
-
-        let mut i = 0;
-        while i < RESERVED_IRQ.len() {
-            let v = RESERVED_IRQ[i] as usize;
-            used[v / 64] |= 1u64 << (v % 64);
-            i += 1;
+        let mut bits = [0u64; 4];
+        let mut vector = 0;
+        while vector < 256 {
+            if !is_external(vector) {
+                bits[vector / 64] |= 1 << (vector % 64);
+            }
+            vector += 1;
         }
-        Self { used }
+        Self(bits)
     }
 
     fn alloc(&mut self) -> Option<u8> {
-        for (word_idx, word) in self.used.iter_mut().enumerate() {
+        for (index, word) in self.0.iter_mut().enumerate() {
             if *word != u64::MAX {
-                let bit = word.trailing_ones();
-                *word |= 1u64 << bit;
-                return Some((word_idx as u8) * 64 + (bit as u8));
+                let bit = word.trailing_ones() as usize;
+                *word |= 1 << bit;
+                return Some((index * 64 + bit) as u8);
             }
         }
         None
     }
 
-    fn alloc_at(&mut self, vec: u8) {
-        let word = &mut self.used[(vec / 64) as usize];
-        let mask = 1u64 << (vec % 64);
-        *word |= mask;
-    }
-
-    fn free(&mut self, vec: u8) {
-        let idx = (vec / 64) as usize;
-        let bit = 1u64 << (vec % 64);
-        debug_assert_ne!(
-            self.used[idx] & bit,
-            0,
-            "double-free of IRQ vector {vec:#x}"
-        );
-        self.used[idx] &= !bit;
-    }
-}
-
-impl Index<u8> for Bitmap {
-    type Output = bool;
-
-    #[inline]
-    fn index(&self, index: u8) -> &Self::Output {
-        let word = self.used[(index / 64) as usize];
-        if (word & (1u64 << (index % 64))) != 0 {
-            &true
-        } else {
-            &false
+    fn free(&mut self, vector: u8) {
+        let vector = usize::from(vector);
+        if is_external(vector) {
+            self.0[vector / 64] &= !(1 << (vector % 64));
         }
     }
 }
 
-pub(crate) struct CoreIrqTable {
-    bitmap: Mutex<Bitmap>,
-    slots: [AtomicPtr<IrqAction>; 256],
+/// IDT stub for external vector `VEC`: forward to the core, then send EOI.
+pub(crate) extern "x86-interrupt" fn irq_dispatch<const VEC: u8>(_f: InterruptStackFrame) {
+    match VECTOR_IRQ[VEC as usize].load(Ordering::Acquire) {
+        UNBOUND => early_println!("[irq] unbound vector {:#x}", VEC),
+        raw => {
+            if let Some(entry) = ENTRY.get() {
+                entry(IrqNum::new(raw));
+            }
+        }
+    }
+    end_interrupt();
 }
 
-impl CoreIrqTable {
-    pub(crate) const fn new() -> Self {
-        Self {
-            bitmap: Mutex::new(Bitmap::new()),
-            slots: [const { AtomicPtr::new(core::ptr::null_mut()) }; 256],
-        }
+impl IrqDeliveryCapability for X86_64 {
+    fn set_entry(entry: fn(IrqNum)) {
+        ENTRY.call_once(|| entry);
     }
 
-    #[inline]
-    pub(crate) fn dispatch(&self, vector: u8) -> bool {
-        let ptr = self.slots[vector as usize].load(Ordering::Acquire);
-        (!ptr.is_null())
-            .then(|| unsafe { (&*ptr).handler.handle(vector) })
-            .is_some()
+    /// Picks a CPU allowed by `affinity` and a free vector for it.
+    fn alloc_target(affinity: Affinity) -> Result<IrqTarget, IrqError> {
+        let cpu = match affinity {
+            Affinity::Cpu(cpu) if Self::cpus().any(|id| id == cpu) => cpu,
+            Affinity::Cpu(_) => return Err(IrqError::InvalidTarget),
+            Affinity::Any => Self::cpus()
+                .nth(NEXT_CPU.fetch_add(1, Ordering::Relaxed) % Self::cpu_count().max(1))
+                .ok_or(IrqError::InvalidTarget)?,
+        };
+        // TODO: this lock should either be a no-block lock or no lock at all.
+        let vector =
+            interrupts::without_interrupts(|| VECTORS.lock().alloc()).ok_or(IrqError::NoFreeIrq)?;
+        Ok(IrqTarget {
+            cpu,
+            vector: u32::from(vector),
+        })
     }
 
-    pub(crate) fn register(&self, handler: &'static dyn IrqHandler) -> Option<u8> {
-        let vec = interrupts::without_interrupts(|| self.bitmap.lock().alloc())?;
-        let action = Box::into_raw(Box::new(IrqAction { handler }));
-        self.slots[vec as usize].store(action, Ordering::Release);
-        Some(vec)
+    fn bind(target: IrqTarget, irq: IrqNum) {
+        VECTOR_IRQ[target.vector as usize].store(irq.raw(), Ordering::Release);
     }
 
-    pub(crate) fn register_at(&self, handler: &'static dyn IrqHandler, vec: u8) -> Option<()> {
-        let action = Box::into_raw(Box::new(IrqAction { handler }));
-
-        let mut bitmap = self.bitmap.lock();
-        if bitmap[vec] {
-            return None;
-        }
-        bitmap.alloc_at(vec);
-
-        debug_assert!(self.slots[vec as usize].load(Ordering::Acquire).is_null());
-        self.slots[vec as usize].store(action, Ordering::Release);
-        Some(())
+    fn unbind(target: IrqTarget) {
+        VECTOR_IRQ[target.vector as usize].store(UNBOUND, Ordering::Release);
     }
 
-    pub(crate) unsafe fn unregister(&self, vec: u8) -> Option<&'static dyn IrqHandler> {
-        let old = self.slots[vec as usize].swap(core::ptr::null_mut(), Ordering::AcqRel);
-        interrupts::without_interrupts(|| self.bitmap.lock().free(vec));
-        (!old.is_null()).then(|| unsafe { Box::from_raw(old) }.handler)
+    fn free_target(target: IrqTarget) {
+        // TODO: this lock should either be a no-block lock or no lock at all.
+        interrupts::without_interrupts(|| VECTORS.lock().free(target.vector as u8));
     }
 }
 
@@ -165,15 +150,14 @@ pub(crate) mod handlers {
         panic!("EXCEPTION: DOUBLE FAULT\n{stack_frame:#?}");
     }
 
+    pub(crate) extern "x86-interrupt" fn nmi_handler(stack_frame: InterruptStackFrame) {
+        panic!("EXCEPTION: NON-MASKABLE INTERRUPT\n{stack_frame:#?}");
+    }
+
     pub(crate) extern "x86-interrupt" fn timer_interrupt(_stack_frame: InterruptStackFrame) {
         TOTAL_TIMER_TICKS.fetch_add(1, Ordering::Relaxed);
         end_interrupt();
     }
-
-    // #[expect(dead_code)]
-    // pub(crate) fn current_tick() -> u64 {
-    //     TOTAL_TIMER_TICKS.load(Ordering::Acquire)
-    // }
 
     pub(crate) extern "x86-interrupt" fn page_fault_handler(
         stack_frame: InterruptStackFrame,
@@ -205,7 +189,8 @@ pub(crate) mod handlers {
     pub(crate) extern "x86-interrupt" fn error_interrupt_handler(
         _stack_frame: InterruptStackFrame,
     ) {
-        early_println!("error interrupt");
+        let flags = crate::apic::lapic::take_error_flags();
+        early_println!("[apic] error interrupt: {:?}", flags);
         end_interrupt();
     }
 }

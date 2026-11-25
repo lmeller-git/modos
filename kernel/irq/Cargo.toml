@@ -11,8 +11,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-bitflags = { workspace = true }
+irq-interfaces = { path = "../irq-interfaces" }
 arch = { path = "../arch" }
+platform = { path = "../platform" }
+spin = { workspace = true }
 
 [lints]
 workspace = true

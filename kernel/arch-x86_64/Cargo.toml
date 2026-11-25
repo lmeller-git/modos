@@ -16,10 +16,10 @@ arch-interfaces = { path = "../arch-interfaces" }
 early-log = { path = "../early-log" }
 x2apic = { workspace = true }
 platform = { path = "../platform" }
+irq-interfaces = { path = "../irq-interfaces" }
 mem-layout = { path = "../mem-layout" }
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
 core_local = { path = "../core_local" }
-bitvec = { version = "1.1.1", default-features = false }
 
 [lints]
 workspace = true

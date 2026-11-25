@@ -41,10 +41,6 @@ impl CpuDataCapability for Primitive {
         my_cpu().cpus.len()
     }
 
-    fn is_bootstrap_cpu() -> bool {
-        my_cpu().cpu.is_bsp
-    }
-
     fn my_cpu() -> BootCpu {
         my_cpu().cpu
     }

@@ -16,6 +16,9 @@ pub type TargetPlatform = PcX86_64;
 #[cfg(not(target_arch = "x86_64"))]
 pub struct TargetPlatform;
 
+#[cfg(target_arch = "x86_64")]
+pub use platform_pc_x86_64::InterruptConfig;
+
 pub trait SupportedPlatform:
     ShutdownCapability + SerialWriterCapability + InterruptControllerCapability
 {

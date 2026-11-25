@@ -1,18 +1,15 @@
-use alloc::boxed::Box;
-
 use conquer_once::spin::OnceCell;
 use x86_64::structures::idt::InterruptDescriptorTable;
 
 use crate::{
     gdt,
     irq::{
-        CoreIrqTable,
-        IRQ_CONTROLLER,
         handlers::{
             breakpoint_handler,
             double_fault_handler,
             error_interrupt_handler,
             gpf_handler,
+            nmi_handler,
             page_fault_handler,
             spurious_interrupt_handler,
             timer_interrupt,
@@ -54,6 +51,9 @@ pub(crate) fn init_idt() {
         idt.double_fault
             .set_handler_fn(double_fault_handler)
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+        idt.non_maskable_interrupt
+            .set_handler_fn(nmi_handler)
+            .set_stack_index(gdt::NMI_IST_INDEX);
     }
     idt.page_fault.set_handler_fn(page_fault_handler);
     idt.general_protection_fault.set_handler_fn(gpf_handler);
@@ -68,10 +68,6 @@ pub(crate) fn init_idt() {
 
     IDT.init_once(|| idt);
     IDT.get().unwrap().load();
-}
-
-pub(crate) fn init_core() {
-    IRQ_CONTROLLER.with(|c| c.get_or_init(|| Box::new(CoreIrqTable::new())));
 }
 
 #[repr(u8)]

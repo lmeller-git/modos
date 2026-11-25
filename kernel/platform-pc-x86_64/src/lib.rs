@@ -8,6 +8,7 @@ mod pic;
 
 use core::fmt::Write;
 
+pub use kernel_acpi::{InterruptConfig, InterruptConfigError, MapMmioFn, NanosFn};
 use platform_interfaces::{
     power::{ExitCode, ShutdownCapability},
     serial::{SerialWriteError, SerialWriterCapability},

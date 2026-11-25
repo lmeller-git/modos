@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(abi_x86_interrupt)]
+#![feature(abi_x86_interrupt, const_range, const_trait_impl)]
 
 extern crate alloc;
 
@@ -14,7 +14,7 @@ use core::{
 use arch_interfaces::{
     cpu::{CpuDataCapability, CpuId, SmpCapability},
     init::InitCapability,
-    interrupt::{InterruptHandlerCapability, IrqHandler},
+    interrupt::InterruptHandlerCapability,
     mm::{
         FlushError,
         FrameAllocatorCapability,
@@ -35,12 +35,9 @@ use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
 use early_log::early_println;
 use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
-use platform::{TargetPlatform, interface::interrupt::InterruptControllerCapability};
+use platform::TargetPlatform;
 use x86_64::{
-    instructions::{
-        interrupts::{self, without_interrupts},
-        port::Port,
-    },
+    instructions::interrupts::{self, without_interrupts},
     registers::{
         control::{Cr0, Cr3, Cr4, Cr4Flags},
         model_specific::{GsBase, Msr},
@@ -108,10 +105,6 @@ impl InitCapability for X86_64 {
 impl CpuDataCapability for X86_64 {
     fn cpu_count() -> usize {
         Primitive::cpu_count()
-    }
-
-    fn is_bootstrap_cpu() -> bool {
-        Primitive::is_bootstrap_cpu()
     }
 
     fn my_cpu() -> BootCpu {
@@ -374,11 +367,11 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     } = *unsafe { Box::from_raw(my_packet as *mut CPUStartupData) };
 
     load_gdt_tss(&data.gdt, &data.selectors);
-    idt::init_core();
-    idt::IDT.get().unwrap().load();
 
     let my_data_ptr = x86_64::VirtAddr::from_ptr(data as *const CPUData);
     GsBase::write(my_data_ptr);
+
+    idt::IDT.get().unwrap().load();
 
     apic::init_ap();
 
@@ -521,26 +514,12 @@ impl InterruptHandlerCapability for X86_64 {
         interrupts::disable();
     }
 
+    fn is_enabled() -> bool {
+        interrupts::are_enabled()
+    }
+
     fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
         without_interrupts(f)
-    }
-
-    fn register_handler(handler: &'static dyn IrqHandler, vec: Option<u8>) -> Option<u8> {
-        let registered_at = if let Some(vec) = vec {
-            irq::IRQ_CONTROLLER.with(|p| p.get().unwrap().register_at(handler, vec))?;
-            vec
-        } else {
-            irq::IRQ_CONTROLLER.with(|p| p.get().unwrap().register(handler))?
-        };
-
-        Some(registered_at)
-    }
-
-    fn deregister_handler(vec: u8) -> Option<&'static dyn IrqHandler> {
-        // SAFETY:
-        // `IRQ_CONTROLLER` is core_local, thus the freed vec is only used by our core.
-        // It is also not currently used.
-        unsafe { irq::IRQ_CONTROLLER.with(|p| p.get().unwrap().unregister(vec)) }
     }
 }
 
@@ -551,8 +530,8 @@ fn early_init(boot_info: &EarlyBootInfo<'_>) {
 }
 
 fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
-    let bsp_stack = build_core_stack(cpu.logical_id);
-    let tss = build_tss(cpu.logical_id);
+    let bsp_stack = build_core_stack(cpu.logical_id.value());
+    let tss = build_tss(cpu.logical_id.value());
     let tss = Box::leak(Box::new(tss));
     let (gdt, selectors) = build_gdt(tss);
     let cls = allocate_cls_block();
@@ -575,7 +554,7 @@ fn build_cpu(cpu: &BootCpu, cpus: &'static [CpuId]) -> &'static mut CPUData {
 
 fn late_init(boot_info: &LateBootInfo) {
     let fallback_bsp = BootCpu {
-        logical_id: 0,
+        logical_id: CpuId::new(0),
         hw_id: apic::cpuid::initial_apic_id() as _,
         is_bsp: true,
     };
@@ -592,7 +571,7 @@ fn late_init(boot_info: &LateBootInfo) {
             .map(|info| {
                 info.cpus
                     .iter()
-                    .map(|cpu| CpuId::new(cpu.logical_id))
+                    .map(|cpu| cpu.logical_id)
                     .collect::<Box<_>>()
             })
             .unwrap_or([CpuId::new(0)].into()),
@@ -602,7 +581,6 @@ fn late_init(boot_info: &LateBootInfo) {
     let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
 
     GsBase::write(my_data_ptr);
-    idt::init_core();
     load_gdt_tss(&my_data.gdt, &my_data.selectors);
 
     idt::init_idt();
@@ -626,43 +604,23 @@ fn late_init(boot_info: &LateBootInfo) {
         );
     }
 
-    unsafe {
-        TargetPlatform::init_interrupt_controllers(&config, bsp_id, mmio::map_mmio);
-    }
+    let cpu_map: Vec<(CpuId, u32)> = boot_info
+        .mp_info
+        .as_ref()
+        .map(|info| {
+            info.cpus
+                .iter()
+                .map(|cpu| (cpu.logical_id, cpu.hw_id))
+                .collect()
+        })
+        .unwrap_or_else(|| Vec::from([(my_cpu.logical_id, my_cpu.hw_id)]));
 
-    // TODO move later when drivers get online
-    init_keyboard_irq(bsp_id);
+    unsafe {
+        TargetPlatform::init_interrupt_controllers(&config, bsp_id, &cpu_map, mmio::map_mmio);
+    }
 
     interrupts::enable();
     apic::enable_timer();
-}
-
-// TODO: these should live in keyboard drivers
-fn init_keyboard_irq(bsp_id: u32) {
-    let irq_line = X86_64::register_handler(&KeyBoardHandler, None).unwrap();
-    TargetPlatform::route_isa_irq(1, irq_line, bsp_id, false);
-    drain_keyboard();
-}
-
-struct KeyBoardHandler;
-
-impl IrqHandler for KeyBoardHandler {
-    fn handle(&self, _vector: u8) {
-        let mut port = Port::new(0x60);
-        let scancode: u8 = unsafe { port.read() };
-        early_println!("received scancode: {}", scancode);
-    }
-}
-
-fn drain_keyboard() {
-    let mut status = Port::<u8>::new(0x64);
-    let mut data = Port::<u8>::new(0x60);
-    for _ in 0..16 {
-        if unsafe { status.read() } & 1 == 0 {
-            break;
-        }
-        _ = unsafe { data.read() };
-    }
 }
 
 fn init_xmm() {

@@ -21,6 +21,10 @@ early_heap = { path = "../early_heap" }
 early-log = { path = "../early-log" }
 platform = { path = "../platform" }
 core_local = { path = "../core_local" }
+irq = { path = "../irq" }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = { workspace = true }
 
 [lints]
 workspace = true

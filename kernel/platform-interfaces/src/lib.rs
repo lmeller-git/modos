@@ -1,7 +1,5 @@
 #![no_std]
 
-extern crate alloc;
-
 pub mod interrupt;
 pub mod power;
 pub mod serial;

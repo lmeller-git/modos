@@ -12,10 +12,10 @@ use x86_64::{
 };
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub(crate) const NMI_IST_INDEX: u16 = 1;
+const IST_STACKS_PER_CORE: usize = 2;
 
-pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
-    let mut tss = TaskStateSegment::new();
-
+fn build_ist_stack(core_id: usize, slot: u16) -> VirtAddr {
     // allocate ist
     // one guard page between each stack
     // layout is
@@ -26,7 +26,8 @@ pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
     // GUARD_PAGE
     // NEXT
     // ....
-    let our_ist_base = IST_STACK_START + core_id * (IST_STACK_SIZE + Size4KiB::SIZE as usize);
+    let index = core_id * IST_STACKS_PER_CORE + slot as usize;
+    let our_ist_base = IST_STACK_START + index * (IST_STACK_SIZE + Size4KiB::SIZE as usize);
     let page_range = Page::<Size4KiB>::range(
         Page::containing_address(VirtAddr::new(our_ist_base as u64)),
         Page::containing_address(VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64)),
@@ -52,8 +53,16 @@ pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
     drop(frame_alloc);
     drop(pagetable);
 
+    VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64)
+}
+
+pub(crate) fn build_tss(core_id: usize) -> TaskStateSegment {
+    let mut tss = TaskStateSegment::new();
+
     tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] =
-        VirtAddr::new((our_ist_base + IST_STACK_SIZE) as u64);
+        build_ist_stack(core_id, DOUBLE_FAULT_IST_INDEX);
+    tss.interrupt_stack_table[NMI_IST_INDEX as usize] = build_ist_stack(core_id, NMI_IST_INDEX);
+
     tss
 }
 

@@ -31,6 +31,7 @@ dependencies = [
  "bitflags 2.13.2",
  "boot",
  "derive_more",
+ "irq-interfaces",
  "thiserror",
 ]
 
@@ -40,11 +41,11 @@ version = "0.1.0"
 dependencies = [
  "arch-interfaces",
  "arch-x86_64-primitives",
- "bitvec",
  "boot",
  "conquer-once",
  "core_local",
  "early-log",
+ "irq-interfaces",
  "mem-layout",
  "platform",
  "raw-cpuid 11.6.0",
@@ -85,18 +86,6 @@ name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
-
-[[package]]
-name = "bitvec"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837"
-dependencies = [
- "funty",
- "radium",
- "tap",
- "wyz",
-]
 
 [[package]]
 name = "boot"
@@ -200,17 +189,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "funty"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
-
-[[package]]
 name = "irq"
 version = "0.1.0"
 dependencies = [
  "arch",
- "bitflags 2.13.2",
+ "irq-interfaces",
+ "platform",
+ "spin",
+]
+
+[[package]]
+name = "irq-interfaces"
+version = "0.1.0"
+dependencies = [
+ "boot",
 ]
 
 [[package]]
@@ -222,7 +214,9 @@ dependencies = [
  "core_local",
  "early-log",
  "early_heap",
+ "irq",
  "platform",
+ "x86_64",
 ]
 
 [[package]]
@@ -230,7 +224,7 @@ name = "kernel-acpi"
 version = "0.1.0"
 dependencies = [
  "acpi",
- "platform-interfaces",
+ "irq-interfaces",
  "x86_64",
 ]
 
@@ -296,6 +290,7 @@ dependencies = [
 name = "platform-interfaces"
 version = "0.1.0"
 dependencies = [
+ "irq-interfaces",
  "thiserror",
 ]
 
@@ -303,6 +298,7 @@ dependencies = [
 name = "platform-pc-x86_64"
 version = "0.1.0"
 dependencies = [
+ "irq-interfaces",
  "kernel-acpi",
  "platform-interfaces",
  "spin",
@@ -328,12 +324,6 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "radium"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "raw-cpuid"
@@ -430,12 +420,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tap"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
-
-[[package]]
 name = "thiserror"
 version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -489,15 +473,6 @@ name = "volatile"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "442887c63f2c839b346c192d047a7c87e73d0689c9157b00b53dcc27dd5ea793"
-
-[[package]]
-name = "wyz"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
-dependencies = [
- "tap",
-]
 
 [[package]]
 name = "x2apic"

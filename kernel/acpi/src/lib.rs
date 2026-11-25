@@ -15,23 +15,50 @@ use acpi::{
         InterruptModel,
         interrupt::{Apic, LocalInterruptLine, NmiProcessor},
     },
-    sdt::madt::{Polarity, TriggerMode},
+    sdt::madt::{Polarity as AcpiPolarity, TriggerMode as AcpiTriggerMode},
 };
-use platform_interfaces::interrupt::{
-    CpuInfo,
-    InterruptConfig,
-    InterruptConfigError,
-    IoApicInfo,
-    IsaOverride,
-    LapicNmi,
-    LapicNmiTable,
-    NanosFn,
-    NmiSource,
-    NmiTarget,
+use irq_interfaces::{
+    IrqSpec,
+    Polarity,
+    TriggerMode,
+    x86::{CpuInfo, IoApicInfo, IsaOverride, LapicNmi, LapicNmiTable, NmiSource, NmiTarget},
 };
 
 mod handler;
 pub use handler::KernelAcpiHandler;
+
+/// Clock returning nanoseconds since boot.
+///
+/// Undefined before timer init.
+pub type NanosFn = fn() -> u64;
+
+/// Maps `len` bytes of device memory starting at `phys` and returns the virtual address of `phys`.
+///
+/// # Safety
+///
+/// `phys` must reference device memory owned by the caller, and the mapping must stay valid for the lifetime of the device.
+pub type MapMmioFn = unsafe fn(phys: u64, len: usize) -> u64;
+
+/// Firmware-described interrupt topology of a PC.
+///
+/// Currently targetted at x86_64 apic.
+pub struct InterruptConfig {
+    pub lapic_phys: u64,
+    pub lapic_nmi: LapicNmiTable,
+    pub nmi_sources: Vec<NmiSource>,
+    pub ioapics: Vec<IoApicInfo>,
+    pub overrides: Vec<IsaOverride>,
+    pub has_legacy_pic: bool,
+}
+
+/// Firmware discovery failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterruptConfigError {
+    /// The firmware tables are missing or malformed.
+    Firmware,
+    /// Firmware describes no APIC interrupt model.
+    NoApic,
+}
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -87,6 +114,28 @@ pub unsafe fn parse(
     Ok(apic_parse(apic, cpus))
 }
 
+fn polarity(p: AcpiPolarity) -> Polarity {
+    match p {
+        AcpiPolarity::ActiveHigh | AcpiPolarity::SameAsBus => Polarity::ActiveHigh,
+        AcpiPolarity::ActiveLow => Polarity::ActiveLow,
+    }
+}
+
+fn trigger_mode(t: AcpiTriggerMode) -> TriggerMode {
+    match t {
+        AcpiTriggerMode::Edge | AcpiTriggerMode::SameAsBus => TriggerMode::Edge,
+        AcpiTriggerMode::Level => TriggerMode::Level,
+    }
+}
+
+fn line(gsi: u32, p: AcpiPolarity, t: AcpiTriggerMode) -> IrqSpec {
+    IrqSpec {
+        hwirq: gsi,
+        trigger: trigger_mode(t),
+        polarity: polarity(p),
+    }
+}
+
 fn apic_parse(apic: Apic, cpus: Vec<CpuInfo>) -> InterruptConfig {
     InterruptConfig {
         lapic_phys: apic.local_apic_address,
@@ -105,8 +154,8 @@ fn apic_parse(apic: Apic, cpus: Vec<CpuInfo>) -> InterruptConfig {
                         LocalInterruptLine::Lint0 => 0,
                         LocalInterruptLine::Lint1 => 1,
                     },
-                    active_low: matches!(s.polarity, Polarity::ActiveLow),
-                    level: matches!(s.trigger_mode, TriggerMode::Level),
+                    trigger: trigger_mode(s.trigger_mode),
+                    polarity: polarity(s.polarity),
                 })
                 .collect(),
         },
@@ -114,9 +163,7 @@ fn apic_parse(apic: Apic, cpus: Vec<CpuInfo>) -> InterruptConfig {
             .nmi_sources
             .iter()
             .map(|n| NmiSource {
-                gsi: n.global_system_interrupt,
-                active_low: matches!(n.polarity, Polarity::ActiveLow),
-                level: matches!(n.trigger_mode, TriggerMode::Level),
+                line: line(n.global_system_interrupt, n.polarity, n.trigger_mode),
             })
             .collect(),
         ioapics: apic
@@ -133,9 +180,7 @@ fn apic_parse(apic: Apic, cpus: Vec<CpuInfo>) -> InterruptConfig {
             .iter()
             .map(|o| IsaOverride {
                 isa_irq: o.isa_source,
-                gsi: o.global_system_interrupt,
-                active_low: matches!(o.polarity, Polarity::ActiveLow),
-                level: matches!(o.trigger_mode, TriggerMode::Level),
+                line: line(o.global_system_interrupt, o.polarity, o.trigger_mode),
             })
             .collect(),
         has_legacy_pic: apic.also_has_legacy_pics,

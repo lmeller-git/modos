@@ -15,6 +15,7 @@ derive_more = { workspace = true }
 bitflags = { workspace = true }
 thiserror = { workspace = true }
 boot = { path = "../boot" }
+irq-interfaces = { path = "../irq-interfaces" }
 
 [lints]
 workspace = true

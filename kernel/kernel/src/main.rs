@@ -13,10 +13,14 @@ use arch::interface::{
     init::InitCapability,
 };
 use early_log::early_println;
+use irq::CpuId;
 use platform::{
     TargetPlatform,
     interface::power::{ExitCode, ShutdownCapability},
 };
+
+#[cfg(target_arch = "x86_64")]
+mod i8042;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn _start() -> ! {
@@ -39,11 +43,15 @@ unsafe extern "C" fn _start() -> ! {
     arch::TargetArch::late_init(&init_once, &late_info).unwrap();
     early_println!("Completed late init");
 
+    irq::init();
+    #[cfg(target_arch = "x86_64")]
+    i8042::init();
+
     arch::TargetArch::core_release(init_once, late_info, core_main)
 }
 
 #[core_local::core_local]
-static CORE_ID: usize = 0;
+static CORE_ID: CpuId = CpuId::new(0);
 
 fn core_main() -> ! {
     let cpu = arch::TargetArch::my_cpu();

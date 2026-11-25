@@ -16,6 +16,7 @@ qemu-platform = []
 
 [dependencies]
 platform-interfaces = { path = "../platform-interfaces" }
+irq-interfaces = { path = "../irq-interfaces" }
 kernel-acpi = { path = "../acpi" }
 x2apic = { workspace = true }
 x86_64 = { workspace = true }

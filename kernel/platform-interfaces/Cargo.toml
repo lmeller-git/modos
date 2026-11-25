@@ -12,6 +12,7 @@ categories.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+irq-interfaces = { path = "../irq-interfaces" }
 
 [lints]
 workspace = true
