@@ -1,14 +1,11 @@
-//! Raw, backend-independent interrupt vocabulary.
-//!
-//! This crate is the shared language of the interrupt stack:
+//! backend-independent interrupt interfaces and types.
 //!
 //! - `arch-interfaces` defines the CPU side (`IrqDeliveryCapability`): where an interrupt arrives.
 //! - `platform-interfaces` defines the controller side (`InterruptControllerCapability`): how a
 //!   line is routed to that place and masked.
-//! - `irq` is the generic core and the only API drivers use.
+//! - `irq` is the generic core and the API drivers should use.
 //!
-//! Types here carry no policy. Backend-specific types that several backend crates have to share
-//! (firmware discovery results, ...) live in cfg-gated modules, e.g. [`x86`].
+//! This crate also contains some backend specific types.
 
 #![no_std]
 

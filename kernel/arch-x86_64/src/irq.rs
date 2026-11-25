@@ -1,14 +1,16 @@
+use alloc::boxed::Box;
 use core::{
     ops::Range,
-    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use arch_interfaces::{
     cpu::CpuDataCapability,
-    interrupt::{Affinity, IrqDeliveryCapability, IrqError, IrqNum, IrqTarget},
+    interrupt::{Affinity, IrqDeliveryCapability, IrqError, IrqTarget},
 };
+use core_local::CLSLazyPtr;
 use early_log::early_println;
-use spin::{Mutex, Once};
+use spin::Mutex;
 use x86_64::{
     instructions::interrupts,
     structures::idt::{InterruptStackFrame, PageFaultErrorCode},
@@ -16,20 +18,16 @@ use x86_64::{
 
 use crate::{X86_64, apic::lapic::end_interrupt};
 
-/// Marks a vector no irq is bound to.
-const UNBOUND: u32 = u32::MAX;
-
-// TODO: ENTRY and VECTOR_IRQ, ... should be core_local. Needs cross core core_local access.
-
-/// Vector -> irq. Currently globa.
-static VECTOR_IRQ: [AtomicU32; 256] = [const { AtomicU32::new(UNBOUND) }; 256];
-
-/// The core's entry point, installed once by `irq`.
-static ENTRY: Once<fn(IrqNum)> = Once::new();
+// TODO: this should also be core_local such that different entries can be installed per core, which might be cool in some usecases.
+// currently blocked by the init sequence.
+// Note that we can use a CLSLazyPtr anyways, as it is functionalyy just a oncecell.
+/// Each cores entry point, installed by `irq`.
+static ENTRY: CLSLazyPtr<fn(IrqTarget)> = CLSLazyPtr::new();
 
 // TODO: use an atomic map
-/// Vectors handed out by [`IrqDeliveryCapability::alloc_target`]. Currently global like [`VECTOR_IRQ`].
-static VECTORS: Mutex<VectorMap> = Mutex::new(VectorMap::new());
+/// Vectors handed out by [`IrqDeliveryCapability::alloc_target`].
+#[core_local::core_local(remote)]
+static VECTORS: CLSLazyPtr<Mutex<VectorMap>> = CLSLazyPtr::new();
 
 /// [`Affinity::Any`] scheduler.
 static NEXT_CPU: AtomicUsize = AtomicUsize::new(0);
@@ -43,6 +41,11 @@ const EXTERNAL_RANGE: Range<usize> = 0x22..0xFF;
 /// valid external vector.
 const fn is_external(vector: usize) -> bool {
     EXTERNAL_RANGE.contains(&vector) && !(vector >= 0xE0 && vector <= 0xEF)
+}
+
+/// initializes arch backend irq handlers on this core
+pub(crate) fn init() {
+    VECTORS.get_or_init(|| Box::new(VectorMap::new().into()));
 }
 
 /// Bitmap of vectors. A set bit is in use or not available to external interrupts.
@@ -82,20 +85,20 @@ impl VectorMap {
 
 /// IDT stub for external vector `VEC`: forward to the core, then send EOI.
 pub(crate) extern "x86-interrupt" fn irq_dispatch<const VEC: u8>(_f: InterruptStackFrame) {
-    match VECTOR_IRQ[VEC as usize].load(Ordering::Acquire) {
-        UNBOUND => early_println!("[irq] unbound vector {:#x}", VEC),
-        raw => {
-            if let Some(entry) = ENTRY.get() {
-                entry(IrqNum::new(raw));
-            }
-        }
+    if let Some(entry) = ENTRY.get() {
+        entry(IrqTarget {
+            cpu: X86_64::my_cpu().logical_id,
+            vector: u32::from(VEC),
+        });
     }
     end_interrupt();
 }
 
 impl IrqDeliveryCapability for X86_64 {
-    fn set_entry(entry: fn(IrqNum)) {
-        ENTRY.call_once(|| entry);
+    const MAX_VECTORS: usize = 256;
+
+    fn set_entry(entry: fn(IrqTarget)) {
+        ENTRY.get_or_init(|| Box::new(entry));
     }
 
     /// Picks a CPU allowed by `affinity` and a free vector for it.
@@ -107,26 +110,23 @@ impl IrqDeliveryCapability for X86_64 {
                 .nth(NEXT_CPU.fetch_add(1, Ordering::Relaxed) % Self::cpu_count().max(1))
                 .ok_or(IrqError::InvalidTarget)?,
         };
-        // TODO: this lock should either be a no-block lock or no lock at all.
+        let vector = VECTORS.get_on(cpu).ok_or(IrqError::NotInitialized)?;
         let vector =
-            interrupts::without_interrupts(|| VECTORS.lock().alloc()).ok_or(IrqError::NoFreeIrq)?;
+            interrupts::without_interrupts(|| vector.lock().alloc()).ok_or(IrqError::NoFreeIrq)?;
         Ok(IrqTarget {
             cpu,
             vector: u32::from(vector),
         })
     }
 
-    fn bind(target: IrqTarget, irq: IrqNum) {
-        VECTOR_IRQ[target.vector as usize].store(irq.raw(), Ordering::Release);
-    }
-
-    fn unbind(target: IrqTarget) {
-        VECTOR_IRQ[target.vector as usize].store(UNBOUND, Ordering::Release);
-    }
-
     fn free_target(target: IrqTarget) {
-        // TODO: this lock should either be a no-block lock or no lock at all.
-        interrupts::without_interrupts(|| VECTORS.lock().free(target.vector as u8));
+        interrupts::without_interrupts(|| {
+            VECTORS
+                .get_on(target.cpu)
+                .unwrap()
+                .lock()
+                .free(target.vector as u8);
+        });
     }
 }
 

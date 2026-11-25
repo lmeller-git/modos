@@ -13,6 +13,7 @@ categories.workspace = true
 [dependencies]
 irq-interfaces = { path = "../irq-interfaces" }
 arch = { path = "../arch" }
+core_local = { path = "../core_local" }
 platform = { path = "../platform" }
 spin = { workspace = true }
 

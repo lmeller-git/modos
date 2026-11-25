@@ -374,6 +374,7 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     GsBase::write(my_data_ptr);
     data.publish_cls();
 
+    irq::init();
     idt::IDT.get().unwrap().load();
 
     apic::init_ap();
@@ -593,6 +594,7 @@ fn late_init(boot_info: &LateBootInfo) {
     my_data.publish_cls();
     load_gdt_tss(&my_data.gdt, &my_data.selectors);
 
+    irq::init();
     idt::init_idt();
 
     apic::timer::init_clock(boot_info.tsc_hz);

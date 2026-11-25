@@ -193,6 +193,7 @@ name = "irq"
 version = "0.1.0"
 dependencies = [
  "arch",
+ "core_local",
  "irq-interfaces",
  "platform",
  "spin",
