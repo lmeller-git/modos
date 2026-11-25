@@ -65,7 +65,7 @@ pub mod memmap {
 }
 
 pub mod mp {
-    use alloc::boxed::Box;
+    use alloc::{boxed::Box, vec::Vec};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     #[repr(C)]
@@ -77,7 +77,7 @@ pub mod mp {
 
     /// Logical ID of a CPU core.
     ///
-    /// Assigned by the bootloader.
+    /// The ids of a system with `n` cores are exactly `0..n`.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
     #[repr(transparent)]
     pub struct CpuId(usize);
@@ -96,8 +96,27 @@ pub mod mp {
 
     pub type CpuEntry = fn(usize) -> !;
 
+    // TODO: we may want to put the bsp at a known logical_id (like 0) for init purposes, ...
+    /// Builds the cpu list from raw bootloader data, assigning dense [`CpuId`]s.
+    pub fn assign_logical_ids(
+        raw: impl IntoIterator<Item = (u64, u32)>,
+        bsp_hw_id: u32,
+    ) -> Box<[BootCpu]> {
+        let mut raw: Vec<_> = raw.into_iter().collect();
+        raw.sort_unstable();
+        raw.into_iter()
+            .enumerate()
+            .map(|(index, (_, hw_id))| BootCpu {
+                logical_id: CpuId::new(index),
+                hw_id,
+                is_bsp: hw_id == bsp_hw_id,
+            })
+            .collect()
+    }
+
     pub struct MpBootInfo {
         pub flags: u32,
+        /// Cores, indexed by logical id.
         pub cpus: Box<[BootCpu]>,
         pub start_cpu: fn(&BootCpu, CpuEntry, usize),
     }

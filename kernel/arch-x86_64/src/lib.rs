@@ -268,7 +268,7 @@ impl SmpCapability for X86_64 {
             .filter(|core| !core.is_bsp)
             .zip(comm.cores.iter())
         {
-            let data = build_cpu(cpu, bsp_cpu.cpus, bsp_cpu.cls_table);
+            let data = build_cpu(cpu, bsp_cpu.cls_table);
 
             let my_packet = Box::leak(Box::new(CPUStartupData {
                 data,
@@ -532,11 +532,7 @@ fn early_init(boot_info: &EarlyBootInfo<'_>) {
     init_xmm();
 }
 
-fn build_cpu(
-    cpu: &BootCpu,
-    cpus: &'static [CpuId],
-    cls_table: &'static [AtomicPtr<u8>],
-) -> &'static mut CPUData {
+fn build_cpu(cpu: &BootCpu, cls_table: &'static [AtomicPtr<u8>]) -> &'static mut CPUData {
     let bsp_stack = build_core_stack(cpu.logical_id.value());
     let tss = build_tss(cpu.logical_id.value());
     let tss = Box::leak(Box::new(tss));
@@ -550,7 +546,6 @@ fn build_cpu(
         gdt,
         selectors,
         tss,
-        cpus,
         cls,
         cls_table,
     };
@@ -572,28 +567,26 @@ fn late_init(boot_info: &LateBootInfo) {
         .and_then(|info| info.cpus.iter().find(|cpu| cpu.is_bsp))
         .unwrap_or(&fallback_bsp);
 
-    let cpus = Box::leak(
-        boot_info
-            .mp_info
-            .as_ref()
-            .map(|info| {
-                info.cpus
-                    .iter()
-                    .map(|cpu| cpu.logical_id)
-                    .collect::<Box<_>>()
-            })
-            .unwrap_or([CpuId::new(0)].into()),
-    );
+    let cpu_count = boot_info.mp_info.as_ref().map_or(1, |info| info.cpus.len());
 
-    cpus.sort_unstable();
+    #[cfg(debug_assertions)]
+    if let Some(info) = &boot_info.mp_info {
+        debug_assert!(
+            info.cpus
+                .iter()
+                .enumerate()
+                .all(|(index, cpu)| cpu.logical_id.value() == index),
+            "arch expects a dense and sorted logical id mapping"
+        );
+    }
 
     let cls_table: &'static [AtomicPtr<u8>] = Box::leak(
-        cpus.iter()
+        (0..cpu_count)
             .map(|_| AtomicPtr::new(ptr::null_mut()))
             .collect::<Box<_>>(),
     );
 
-    let my_data = build_cpu(my_cpu, cpus, cls_table);
+    let my_data = build_cpu(my_cpu, cls_table);
     let my_data_ptr = x86_64::VirtAddr::from_ptr(my_data as *mut CPUData);
 
     GsBase::write(my_data_ptr);

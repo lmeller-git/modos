@@ -23,7 +23,7 @@ use crate::{
     BootLoaderInfo,
     EarlyBootInfo,
     LateBootInfo,
-    mp::{BootCpu, CpuEntry, CpuId, MpBootInfo},
+    mp::{BootCpu, CpuEntry, MpBootInfo, assign_logical_ids},
 };
 
 /// Sets the base revision to the latest revision supported by the crate.
@@ -111,15 +111,13 @@ pub(crate) fn build_early_bootinfo<'a>() -> EarlyBootInfo<'a> {
 pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInfo {
     let mp_info = MP_REQUEST.response().map(|response| MpBootInfo {
         flags: response.flags,
-        cpus: response
-            .cpus()
-            .iter()
-            .map(|core_data| BootCpu {
-                logical_id: CpuId::new(core_data.processor_id as usize),
-                hw_id: core_data.lapic_id,
-                is_bsp: core_data.lapic_id == response.bsp_lapic_id,
-            })
-            .collect(),
+        cpus: assign_logical_ids(
+            response
+                .cpus()
+                .iter()
+                .map(|core_data| (u64::from(core_data.processor_id), core_data.lapic_id)),
+            response.bsp_lapic_id,
+        ),
         start_cpu,
     });
 

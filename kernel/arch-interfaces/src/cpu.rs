@@ -5,7 +5,7 @@ use boot::{LateBootInfo, mp::BootCpu};
 pub trait CpuDataCapability {
     /// Returns the total count of active cores.
     fn cpu_count() -> usize;
-    /// Returns an iterator over all active logical core ids.
+    /// Returns an iterator over all active logical core ids, which are exactly `0..cpu_count()`.
     fn cpus() -> impl Iterator<Item = CpuId>;
     /// Returns data representing the core we are on.
     fn my_cpu() -> BootCpu;
