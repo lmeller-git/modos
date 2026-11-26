@@ -21,11 +21,19 @@ type Table = [AtomicPtr<Desc>; VECTORS];
 static IRQ_TABLE: CLSLazyPtr<Table> = CLSLazyPtr::new();
 
 /// The number naming the interrupt delivered at `target`.
+///
+/// Panics if `target.vector` is not a vector of its CPU.
 pub(crate) fn irq_of(target: IrqTarget) -> IrqNum {
-    debug_assert!((target.vector as usize) < VECTORS);
+    let vector = target.vector as usize;
+    assert!(vector < VECTORS, "vector {vector} out of range");
 
-    let raw = target.cpu.value() * VECTORS + target.vector as usize;
-    IrqNum::new(u32::try_from(raw).expect("irq number space exhausted"))
+    let raw = target
+        .cpu
+        .value()
+        .checked_mul(VECTORS)
+        .and_then(|base| u32::try_from(base + vector).ok())
+        .expect("irq number space exhausted");
+    IrqNum::new(raw)
 }
 
 /// The delivery target `irq` names.
@@ -64,7 +72,7 @@ pub(crate) fn get<'a>(_section: &'a ReadGuard<'_>, vector: u32) -> Option<&'a De
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use test_host::config;
+    use test_host::{config, panics};
 
     use super::*;
 
@@ -92,13 +100,22 @@ mod tests {
             }
         }
 
+        /// Targets with no irq number panic instead of aliasing another target's number.
         #[test]
-        #[should_panic(expected = "irq number space exhausted")]
-        fn number_space_exhausted() {
-            irq_of(IrqTarget {
-                cpu: CpuId::new(MAX_CPU + 1),
-                vector: 0,
-            });
+        fn unnameable_targets() {
+            let target = |cpu, vector| IrqTarget {
+                cpu: CpuId::new(cpu),
+                vector,
+            };
+            for t in [
+                target(0, VECTORS as u32),
+                target(0, u32::MAX),
+                target(MAX_CPU, VECTORS as u32),
+                target(MAX_CPU + 1, 0),
+                target(usize::MAX, 0),
+            ] {
+                assert!(panics(|| irq_of(t)), "{t:?}");
+            }
         }
     }
 }

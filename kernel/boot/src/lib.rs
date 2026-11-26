@@ -102,11 +102,19 @@ pub mod mp {
     /// Builds the cpu list from raw bootloader data, assigning dense [`CpuId`]s.
     ///
     /// The BSP (if present) gets id 0; the other cores follow ordered by `(processor_id, hw_id)`.
+    ///
+    /// Panics if two cores share a hardware id: they could not be told apart (or both be the BSP).
     pub fn assign_logical_ids(
         raw: impl IntoIterator<Item = (u64, u32)>,
         bsp_hw_id: u32,
     ) -> Box<[BootCpu]> {
         let mut raw: Vec<_> = raw.into_iter().collect();
+        let mut hw_ids: Vec<u32> = raw.iter().map(|&(_, hw_id)| hw_id).collect();
+        hw_ids.sort_unstable();
+        if let Some(pair) = hw_ids.windows(2).find(|pair| pair[0] == pair[1]) {
+            panic!("two cores share hardware id {}", pair[0]);
+        }
+
         raw.sort_unstable();
         // bsp gets index 0
         raw.sort_by_key(|&(_, hw_id)| hw_id != bsp_hw_id);
@@ -132,7 +140,7 @@ pub mod mp {
         use alloc::{vec, vec::Vec};
 
         use proptest::prelude::*;
-        use test_host::config;
+        use test_host::{config, panics};
 
         use super::*;
 
@@ -176,6 +184,19 @@ pub mod mp {
                 prop_assert!(others.is_sorted());
 
                 prop_assert_eq!(assign_logical_ids(shuffled, bsp), cpus);
+            }
+
+            /// A hardware id listed twice (under any processor ids) is rejected.
+            #[test]
+            fn duplicate_hw_id(
+                raw in prop::collection::vec((0..4u64, any::<u32>()), 1..12),
+                pick in any::<prop::sample::Index>(),
+                processor in 0..4u64,
+                bsp in any::<u32>(),
+            ) {
+                let mut raw = raw;
+                raw.push((processor, raw[pick.index(raw.len())].1));
+                prop_assert!(panics(|| assign_logical_ids(raw, bsp)));
             }
         }
     }

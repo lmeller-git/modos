@@ -36,7 +36,6 @@ use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, m
 use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
 use early_log::early_println;
-use mem_layout::{CORE_STACK_SIZE, CORE_STACK_START};
 use platform::TargetPlatform;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
@@ -69,6 +68,7 @@ mod idt;
 mod irq;
 pub(crate) mod mmio;
 pub(crate) mod page;
+mod stack;
 
 /// Capability provider for x86_64 targets
 pub struct X86_64;
@@ -195,41 +195,7 @@ fn comm_init(boot_info: &LateBootInfo) -> APBringupSync {
 }
 
 fn build_core_stack(logical_id: usize) -> NonNull<u8> {
-    // allocate a stack
-    // one guard page between each stack
-    // layout is
-    // START_ADDRESS
-    // ....
-    // STACK_SIZE
-    // ....
-    // GUARD_PAGE
-    // NEXT
-    // ....
-    let our_base = CORE_STACK_START + logical_id * (CORE_STACK_SIZE + Size4KiB::SIZE as usize);
-
-    let page_range = Page::<Size4KiB>::range(
-        Page::containing_address(x86_64::VirtAddr::new(our_base as u64)),
-        Page::containing_address(x86_64::VirtAddr::new((our_base + CORE_STACK_SIZE) as u64)),
-    );
-
-    let mut frame_alloc = frame::get_frame_alloc().lock();
-    let mut pagetable = page::get_pagetable().lock();
-
-    for page in page_range {
-        let frame = frame_alloc.allocate_frame().unwrap();
-        unsafe {
-            pagetable.map_to(
-                page,
-                frame,
-                PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE,
-                &mut *frame_alloc,
-            )
-        }
-        .unwrap()
-        .flush();
-    }
-
-    NonNull::new((our_base + CORE_STACK_SIZE) as *mut _).unwrap()
+    NonNull::new(stack::CORE_STACKS.map(logical_id).as_mut_ptr()).unwrap()
 }
 
 impl SmpCapability for X86_64 {

@@ -318,13 +318,17 @@ pub(crate) mod timer {
         ticks_to_nanos(ticks, hz)
     }
 
-    /// Converts `ticks` at `hz` to nanoseconds.
-    ///
-    /// Overflows once `hz > ~1.8e10` (`rem * 1e9`) or the result exceeds a `u64`.
+    /// Converts `ticks` at `hz` to nanoseconds, saturating at `u64::MAX` (after ~584 years).
+    /// A clock that was never started (`hz == 0`) reads 0.
     fn ticks_to_nanos(ticks: u64, hz: u64) -> u64 {
+        if hz == 0 {
+            return 0;
+        }
         let secs = ticks / hz;
         let rem = ticks % hz;
-        secs * 1_000_000_000 + rem * 1_000_000_000 / hz
+        // `rem < hz`, so the fraction is below 1e9; `u128` keeps `rem * 1e9` exact for any `hz`.
+        let frac = (u128::from(rem) * 1_000_000_000 / u128::from(hz)) as u64;
+        secs.saturating_mul(1_000_000_000).saturating_add(frac)
     }
 
     /// One PIT measurement: TSC cycles elapsed during `PIT_COUNT` PIT ticks, or `None` on timeout.
@@ -434,21 +438,20 @@ pub(crate) mod timer {
 
         use super::*;
 
-        const SECS_PER_YEAR: u64 = 365 * 24 * 3600;
-
         proptest! {
             #![proptest_config(config())]
 
-            /// Matches exact `u128` arithmetic for `hz` from 1 MHz to 10 GHz and uptimes up to
-            /// 10 years.
+            /// Matches exact `u128` arithmetic, saturated to `u64`, for any tick count and
+            /// frequency; an unstarted clock (`hz == 0`) reads 0.
             #[test]
             fn nanos(
-                hz in 1_000_000..=10_000_000_000u64,
-                secs in 0..10 * SECS_PER_YEAR,
-                rem in any::<prop::sample::Index>(),
+                hz in prop_oneof![Just(0u64), 1..=20_000_000_000u64, any::<u64>()],
+                ticks in prop_oneof![any::<u64>(), u64::MAX - 1000..=u64::MAX],
             ) {
-                let ticks = secs * hz + rem.index(hz as usize) as u64;
-                let expected = u128::from(ticks) * 1_000_000_000 / u128::from(hz);
+                let expected = match hz {
+                    0 => 0,
+                    _ => (u128::from(ticks) * 1_000_000_000 / u128::from(hz)).min(u64::MAX.into()),
+                };
                 prop_assert_eq!(u128::from(ticks_to_nanos(ticks, hz)), expected);
             }
         }

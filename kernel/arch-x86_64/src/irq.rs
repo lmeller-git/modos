@@ -238,13 +238,17 @@ mod tests {
         #[derive(Clone, Copy, Debug)]
         enum Op {
             Alloc,
-            Free(u8),
+            /// Frees one of the allocated vectors.
+            Free(prop::sample::Index),
+            /// Frees a vector nobody holds: reserved, or currently free.
+            FreeUnowned(u8),
         }
 
         fn ops() -> impl Strategy<Value = Vec<Op>> {
             let op = prop_oneof![
-                3 => Just(Op::Alloc),
-                2 => (0x1E..=0xFFu8).prop_map(Op::Free),
+                4 => Just(Op::Alloc),
+                3 => any::<prop::sample::Index>().prop_map(Op::Free),
+                1 => any::<u8>().prop_map(Op::FreeUnowned),
             ];
             prop::collection::vec(op, 0..OPS)
         }
@@ -262,23 +266,30 @@ mod tests {
         proptest! {
             #![proptest_config(config())]
 
-            /// `alloc` returns the lowest free external vector; `free` only releases external
-            /// vectors.
+            /// `alloc` returns the lowest free external vector and `free` returns an allocated
+            /// one; freeing a vector nobody holds changes nothing.
             #[test]
             fn matches_set_model(ops in ops()) {
                 let mut map = VectorMap::new();
                 let mut free: BTreeSet<u8> =
                     (0..=255u8).filter(|&v| is_external(v.into())).collect();
+                let mut held: Vec<u8> = Vec::new();
 
                 for op in ops {
                     match op {
-                        Op::Alloc => prop_assert_eq!(map.alloc(), free.pop_first()),
-                        Op::Free(vector) => {
-                            map.free(vector);
-                            if is_external(vector.into()) {
-                                free.insert(vector);
-                            }
+                        Op::Alloc => {
+                            let vector = map.alloc();
+                            prop_assert_eq!(vector, free.pop_first());
+                            held.extend(vector);
                         }
+                        Op::Free(index) if !held.is_empty() => {
+                            let vector = held.swap_remove(index.index(held.len()));
+                            map.free(vector);
+                            free.insert(vector);
+                        }
+                        Op::Free(_) => {}
+                        Op::FreeUnowned(vector) if !held.contains(&vector) => map.free(vector),
+                        Op::FreeUnowned(_) => {}
                     }
                 }
                 // Whatever the history, the remaining vectors come out in order.
