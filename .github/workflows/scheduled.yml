@@ -29,6 +29,10 @@ jobs:
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # tag=v2.90.1
+        with:
+          tool: cargo-nextest
       - name: make test-host
         run: make test-host CARGO_FLAGS="--locked"
   # https://twitter.com/alcuadrado/status/1571291687837732873
@@ -55,6 +59,11 @@ jobs:
       - name: cargo update
         if: hashFiles('Cargo.lock') != ''
         run: cargo update
+      - name: Install cargo-nextest
+        if: hashFiles('Cargo.lock') != ''
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # tag=v2.90.1
+        with:
+          tool: cargo-nextest
       - name: make test-host
         if: hashFiles('Cargo.lock') != ''
         run: make test-host CARGO_FLAGS="--locked --all-features"
