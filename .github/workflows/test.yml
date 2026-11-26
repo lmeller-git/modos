@@ -91,7 +91,7 @@ jobs:
           tool: cargo-nextest
       - name: make test-host
         run: make test-host CARGO_FLAGS="--locked"
-    coverage:
+  coverage:
     # use llvm-cov to build and collect coverage and outputs in a format that
     # is compatible with codecov.io
     #
