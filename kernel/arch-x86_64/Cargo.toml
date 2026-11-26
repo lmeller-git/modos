@@ -21,5 +21,9 @@ mem-layout = { path = "../mem-layout" }
 arch-x86_64-primitives = { path = "../arch-x86_64-primitives" }
 core_local = { path = "../core_local" }
 
+[dev-dependencies]
+proptest = { workspace = true }
+test-host = { path = "../test-host" }
+
 [lints]
 workspace = true

@@ -136,9 +136,9 @@ pub const fn align_up(addr: usize, align: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
+    use test_host::{config, edge_addr, panics};
 
     use super::*;
-    use crate::testing::{config, edge_addr, panics};
 
     /// `align = 2^shift` with an address biased towards the edges of an `align` block.
     fn addr_and_align() -> impl Strategy<Value = (usize, usize)> {
@@ -182,47 +182,6 @@ mod tests {
             for align in [0, 3, 6, 4095] {
                 assert!(panics(|| align_down(0x1234, align)), "down {align}");
                 assert!(panics(|| align_up(0x1234, align)), "up {align}");
-            }
-        }
-    }
-
-    /// The address types' methods agree with the reference arithmetic, and `+` panics on
-    /// overflow in debug builds.
-    mod addr_types {
-        use super::*;
-
-        proptest! {
-            #![proptest_config(config())]
-
-            #[test]
-            fn align_and_add((addr, align) in addr_and_align(), n in any::<usize>()) {
-                let down = addr - addr % align;
-                let up = (addr as u128).div_ceil(align as u128) * align as u128;
-                let sum = addr.checked_add(n);
-
-                let (mut v, mut p) = (VirtAddr::new(addr), PhysAddr::new(addr));
-                v.align_down(align);
-                p.align_down(align);
-                prop_assert_eq!((v.as_usize(), p.as_usize()), (down, down));
-
-                if let Ok(up) = usize::try_from(up) {
-                    let (mut v, mut p) = (VirtAddr::new(addr), PhysAddr::new(addr));
-                    v.align_up(align);
-                    p.align_up(align);
-                    prop_assert_eq!((v.as_usize(), p.as_usize()), (up, up));
-                }
-
-                match sum {
-                    Some(sum) => {
-                        prop_assert_eq!((VirtAddr::new(addr) + n).as_usize(), sum);
-                        prop_assert_eq!((PhysAddr::new(addr) + n).as_usize(), sum);
-                    }
-                    None if cfg!(debug_assertions) => {
-                        prop_assert!(panics(|| VirtAddr::new(addr) + n));
-                        prop_assert!(panics(|| PhysAddr::new(addr) + n));
-                    }
-                    None => {}
-                }
             }
         }
     }

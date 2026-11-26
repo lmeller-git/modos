@@ -92,6 +92,7 @@ help:
 	@echo "  help         Show this usage text"
 	@echo "  doc          Run docs-rs for the kernel package"
 	@echo "  hack         Type-check feature combinations using cargo-hack"
+	@echo "  edges        Check the crate dependency layering rules"
 	@echo ""
 	@echo "User Variables / Flags:"
 	@echo "  RUST_PROFILE      Cargo profile [dev|release] (default: dev)"
@@ -130,6 +131,11 @@ clippy:
 .PHONY: doc
 doc:
 	$(KERNEL_ENV) cargo doc -p $(KERNEL_PKG) --no-deps $(KERNEL_ARGS)
+
+.PHONY: edges
+edges:
+	python3 scripts/check_edges.py
+	cd scripts && python3 -m unittest test_check_edges
 
 .PHONY: hack
 hack:

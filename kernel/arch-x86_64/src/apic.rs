@@ -47,7 +47,6 @@ pub(crate) mod lapic {
     use early_log::early_println;
     use irq_interfaces::{
         Polarity,
-        TriggerMode,
         x86::{LapicNmi, LapicNmiTable},
     };
     use x2apic::lapic::{ErrorFlags, LocalApic, LocalApicBuilder, TimerDivide, TimerMode};
@@ -74,15 +73,13 @@ pub(crate) mod lapic {
     /// LVT entry: delivery mode NMI (100b), unmasked.
     const LVT_NMI_BASE: u32 = 0b100 << 8;
     const LVT_PIN_POLARITY_LOW: u32 = 1 << 13;
-    const LVT_TRIGGER_LEVEL: u32 = 1 << 15;
 
+    /// The trigger mode bit only applies to fixed delivery: NMIs are always edge triggered
+    /// (Intel SDM, LVT), so `nmi.trigger` is not encoded.
     fn lvt_nmi_value(nmi: LapicNmi) -> u32 {
         let mut val = LVT_NMI_BASE;
         if nmi.polarity == Polarity::ActiveLow {
             val |= LVT_PIN_POLARITY_LOW;
-        }
-        if nmi.trigger == TriggerMode::Level {
-            val |= LVT_TRIGGER_LEVEL;
         }
         val
     }
@@ -203,6 +200,34 @@ pub(crate) mod lapic {
         unsafe { write_reg(reg::ERROR, 0) };
         flags
     }
+
+    #[cfg(test)]
+    mod tests {
+        use irq_interfaces::{TriggerMode, x86::NmiTarget};
+
+        use super::*;
+
+        /// Intel SDM: delivery mode NMI is `100b` at bits 8-10 and polarity-low is bit 13. The
+        /// trigger bit (15) stays clear: NMIs are edge triggered whatever firmware says.
+        #[test]
+        fn lvt_nmi() {
+            let cases = [
+                (Polarity::ActiveHigh, TriggerMode::Edge, 0x0400),
+                (Polarity::ActiveLow, TriggerMode::Edge, 0x2400),
+                (Polarity::ActiveHigh, TriggerMode::Level, 0x0400),
+                (Polarity::ActiveLow, TriggerMode::Level, 0x2400),
+            ];
+            for (polarity, trigger, expected) in cases {
+                let nmi = LapicNmi {
+                    target: NmiTarget::All,
+                    lint: 0,
+                    trigger,
+                    polarity,
+                };
+                assert_eq!(lvt_nmi_value(nmi), expected, "{polarity:?} {trigger:?}");
+            }
+        }
+    }
 }
 
 pub(crate) mod timer {
@@ -290,6 +315,13 @@ pub(crate) mod timer {
 
         let ticks = rdtsc_serialized().wrapping_sub(BOOT_TSC.load(Ordering::Relaxed));
 
+        ticks_to_nanos(ticks, hz)
+    }
+
+    /// Converts `ticks` at `hz` to nanoseconds.
+    ///
+    /// Overflows once `hz > ~1.8e10` (`rem * 1e9`) or the result exceeds a `u64`.
+    fn ticks_to_nanos(ticks: u64, hz: u64) -> u64 {
         let secs = ticks / hz;
         let rem = ticks % hz;
         secs * 1_000_000_000 + rem * 1_000_000_000 / hz
@@ -393,6 +425,33 @@ pub(crate) mod timer {
             l.set_timer_initial(count);
             l.enable_timer();
         });
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use proptest::prelude::*;
+        use test_host::config;
+
+        use super::*;
+
+        const SECS_PER_YEAR: u64 = 365 * 24 * 3600;
+
+        proptest! {
+            #![proptest_config(config())]
+
+            /// Matches exact `u128` arithmetic for `hz` from 1 MHz to 10 GHz and uptimes up to
+            /// 10 years.
+            #[test]
+            fn nanos(
+                hz in 1_000_000..=10_000_000_000u64,
+                secs in 0..10 * SECS_PER_YEAR,
+                rem in any::<prop::sample::Index>(),
+            ) {
+                let ticks = secs * hz + rem.index(hz as usize) as u64;
+                let expected = u128::from(ticks) * 1_000_000_000 / u128::from(hz);
+                prop_assert_eq!(u128::from(ticks_to_nanos(ticks, hz)), expected);
+            }
+        }
     }
 }
 

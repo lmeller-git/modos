@@ -23,5 +23,9 @@ x86_64 = { workspace = true }
 spin = { workspace = true }
 uart_16550 = "0.3.2"
 
+[dev-dependencies]
+proptest = { workspace = true }
+test-host = { path = "../test-host" }
+
 [lints]
 workspace = true

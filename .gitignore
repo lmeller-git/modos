@@ -5,3 +5,4 @@
 *.iso
 *.hdd
 qemu.log
+__pycache__/

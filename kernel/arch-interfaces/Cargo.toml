@@ -19,6 +19,7 @@ irq-interfaces = { path = "../irq-interfaces" }
 
 [dev-dependencies]
 proptest = { workspace = true }
+test-host = { path = "../test-host" }
 
 [lints]
 workspace = true

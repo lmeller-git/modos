@@ -13,5 +13,9 @@ categories.workspace = true
 [dependencies]
 boot = { path = "../boot" }
 
+[dev-dependencies]
+proptest = { workspace = true }
+test-host = { path = "../test-host" }
+
 [lints]
 workspace = true

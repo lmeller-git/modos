@@ -116,3 +116,6 @@ pub enum IrqError {
     /// The backend does not support the request.
     Unsupported,
 }
+
+#[cfg(test)]
+extern crate std;

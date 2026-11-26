@@ -49,6 +49,9 @@ pub use irq_interfaces::{
 };
 use platform::TargetPlatform;
 
+#[cfg(test)]
+extern crate std;
+
 mod claims;
 mod guard;
 mod slots;

@@ -259,9 +259,9 @@ mod tests {
     use alloc::vec::Vec;
 
     use proptest::prelude::*;
+    use test_host::{config, edge_addr};
 
     use super::*;
-    use crate::testing::{config, edge_addr};
 
     const KIB4: usize = FRAME_4KIB_SIZE;
     const MIB2: usize = 2 << 20;

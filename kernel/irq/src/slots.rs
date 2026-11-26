@@ -60,3 +60,45 @@ pub(crate) fn get<'a>(_section: &'a ReadGuard<'_>, vector: u32) -> Option<&'a De
     let slot = IRQ_TABLE.get()?.get(vector as usize)?;
     unsafe { slot.load(Ordering::Acquire).as_ref() }
 }
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+    use test_host::config;
+
+    use super::*;
+
+    /// Highest cpu id whose irq numbers still fit a `u32`.
+    const MAX_CPU: usize = u32::MAX as usize / VECTORS;
+
+    mod irq_num {
+        use super::*;
+
+        proptest! {
+            #![proptest_config(config())]
+
+            /// Targets and numbers are in bijection.
+            #[test]
+            fn target_roundtrip(
+                cpu in prop_oneof![0..64usize, MAX_CPU - 64..=MAX_CPU],
+                vector in 0..VECTORS as u32,
+                raw in any::<u32>(),
+            ) {
+                let target = IrqTarget { cpu: CpuId::new(cpu), vector };
+                prop_assert_eq!(target_of(irq_of(target)), target);
+
+                let irq = IrqNum::new(raw);
+                prop_assert_eq!(irq_of(target_of(irq)), irq);
+            }
+        }
+
+        #[test]
+        #[should_panic(expected = "irq number space exhausted")]
+        fn number_space_exhausted() {
+            irq_of(IrqTarget {
+                cpu: CpuId::new(MAX_CPU + 1),
+                vector: 0,
+            });
+        }
+    }
+}

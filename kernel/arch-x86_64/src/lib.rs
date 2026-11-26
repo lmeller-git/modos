@@ -2,6 +2,8 @@
 #![feature(abi_x86_interrupt, const_range, const_trait_impl)]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
@@ -451,7 +453,7 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
                         frame.start().as_usize() as u64,
                     ))
                     .unwrap(),
-                    PageTableFlags::from_bits(flags.bits()).unwrap(),
+                    page_table_flags(flags),
                     &mut FrameAllocView(frame_allocator),
                 )
                 .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
@@ -641,5 +643,26 @@ fn init_xmm() {
             cr4.insert(Cr4Flags::OSFXSR);
             cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
         });
+    }
+}
+
+/// Converts to the x86_64 flags
+fn page_table_flags(flags: arch_interfaces::mm::PageFlags) -> PageTableFlags {
+    PageTableFlags::from_bits(flags.bits()).expect("PageFlags are a subset of the hardware flags")
+}
+
+#[cfg(test)]
+mod tests {
+    use arch_interfaces::mm::PageFlags;
+
+    use super::*;
+
+    /// Every flag we define (including the OS bits) converts to the same hardware bits.
+    #[test]
+    fn page_flags_convert() {
+        assert_eq!(
+            page_table_flags(PageFlags::all()).bits(),
+            PageFlags::all().bits()
+        );
     }
 }

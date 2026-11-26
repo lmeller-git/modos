@@ -17,5 +17,9 @@ core_local = { path = "../core_local" }
 platform = { path = "../platform" }
 spin = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+test-host = { path = "../test-host" }
+
 [lints]
 workspace = true

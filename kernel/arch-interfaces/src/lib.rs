@@ -9,5 +9,3 @@ pub mod mm;
 extern crate alloc;
 #[cfg(test)]
 extern crate std;
-#[cfg(test)]
-mod testing;

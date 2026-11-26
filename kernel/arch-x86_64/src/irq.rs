@@ -194,3 +194,97 @@ pub(crate) mod handlers {
         end_interrupt();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::BTreeSet, vec::Vec};
+
+    use proptest::prelude::*;
+    use test_host::config;
+
+    use super::*;
+
+    /// `0x22..0xFF` is 221 vectors, minus the 16 in `0xE0..=0xEF`.
+    const EXTERNAL: usize = 205;
+
+    #[test]
+    fn external_vectors() {
+        let boundaries = [
+            (0x00, false),
+            (0x20, false),
+            (0x21, false),
+            (0x22, true),
+            (0xDF, true),
+            (0xE0, false),
+            (0xEF, false),
+            (0xF0, true),
+            (0xFE, true),
+            (0xFF, false),
+        ];
+        for (vector, external) in boundaries {
+            assert_eq!(is_external(vector), external, "{vector:#x}");
+        }
+        assert_eq!((0..256).filter(|&v| is_external(v)).count(), EXTERNAL);
+    }
+
+    mod vector_map {
+        use super::*;
+
+        #[cfg(any(miri, loom, shuttle))]
+        const OPS: usize = 40;
+        #[cfg(not(any(miri, loom, shuttle)))]
+        const OPS: usize = 600;
+
+        #[derive(Clone, Copy, Debug)]
+        enum Op {
+            Alloc,
+            Free(u8),
+        }
+
+        fn ops() -> impl Strategy<Value = Vec<Op>> {
+            let op = prop_oneof![
+                3 => Just(Op::Alloc),
+                2 => (0x1E..=0xFFu8).prop_map(Op::Free),
+            ];
+            prop::collection::vec(op, 0..OPS)
+        }
+
+        #[test]
+        fn exhaustion() {
+            let mut map = VectorMap::new();
+            let all: Vec<u8> = core::iter::from_fn(|| map.alloc()).collect();
+
+            let external: Vec<u8> = (0..=255u8).filter(|&v| is_external(v.into())).collect();
+            assert_eq!(all, external);
+            assert_eq!(map.alloc(), None);
+        }
+
+        proptest! {
+            #![proptest_config(config())]
+
+            /// `alloc` returns the lowest free external vector; `free` only releases external
+            /// vectors.
+            #[test]
+            fn matches_set_model(ops in ops()) {
+                let mut map = VectorMap::new();
+                let mut free: BTreeSet<u8> =
+                    (0..=255u8).filter(|&v| is_external(v.into())).collect();
+
+                for op in ops {
+                    match op {
+                        Op::Alloc => prop_assert_eq!(map.alloc(), free.pop_first()),
+                        Op::Free(vector) => {
+                            map.free(vector);
+                            if is_external(vector.into()) {
+                                free.insert(vector);
+                            }
+                        }
+                    }
+                }
+                // Whatever the history, the remaining vectors come out in order.
+                let rest: Vec<u8> = core::iter::from_fn(|| map.alloc()).collect();
+                prop_assert_eq!(rest, free.into_iter().collect::<Vec<_>>());
+            }
+        }
+    }
+}

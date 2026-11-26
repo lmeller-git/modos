@@ -22,6 +22,7 @@ use core::{
 // So we should guard this access somehow... Maybe core pinning to tell schedulers "this task must stay here for now"? Not clear yet, as we do not have a scheduler. right now every core has its own "thread" anyways, soe no rescheduling can happen currently.
 pub use core_local_macros::core_local;
 
+// Note: we depend on x86_64-primitives directly, since arch and arch-x86_64 use core_local.
 #[cfg(target_arch = "x86_64")]
 type CpuDataProvider = arch_x86_64_primitives::Primitive;
 #[cfg(not(target_arch = "x86_64"))]

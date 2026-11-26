@@ -163,3 +163,28 @@ fn start_cpu(cpu: &BootCpu, entry: CpuEntry, arg: usize) {
     let packet = Box::leak(Box::new(StartPacket { entry, arg }));
     info.bootstrap(ap_trampoline, packet as *mut _ as u64);
 }
+
+// `build_early_bootinfo` transmutes limine's entries into ours, and the constants are copies.
+const _: () = {
+    use core::mem::{align_of, offset_of, size_of};
+
+    use limine::memmap as lim;
+
+    use crate::memmap as ours;
+
+    assert!(size_of::<ours::Entry>() == size_of::<lim::Entry>());
+    assert!(align_of::<ours::Entry>() == align_of::<lim::Entry>());
+    assert!(offset_of!(ours::Entry, base) == offset_of!(lim::Entry, base));
+    assert!(offset_of!(ours::Entry, length) == offset_of!(lim::Entry, length));
+    assert!(offset_of!(ours::Entry, type_) == offset_of!(lim::Entry, type_));
+
+    assert!(ours::MEMMAP_USABLE == lim::MEMMAP_USABLE);
+    assert!(ours::MEMMAP_RESERVED == lim::MEMMAP_RESERVED);
+    assert!(ours::MEMMAP_ACPI_RECLAIMABLE == lim::MEMMAP_ACPI_RECLAIMABLE);
+    assert!(ours::MEMMAP_ACPI_NVS == lim::MEMMAP_ACPI_NVS);
+    assert!(ours::MEMMAP_BAD_MEMORY == lim::MEMMAP_BAD_MEMORY);
+    assert!(ours::MEMMAP_BOOTLOADER_RECLAIMABLE == lim::MEMMAP_BOOTLOADER_RECLAIMABLE);
+    assert!(ours::MEMMAP_EXECUTABLE_AND_MODULES == lim::MEMMAP_EXECUTABLE_AND_MODULES);
+    assert!(ours::MEMMAP_FRAMEBUFFER == lim::MEMMAP_FRAMEBUFFER);
+    assert!(ours::MEMMAP_MAPPED_RESERVED == lim::MEMMAP_MAPPED_RESERVED);
+};

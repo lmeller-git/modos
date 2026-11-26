@@ -10,6 +10,9 @@ use crate::{memmap::Entry, mp::MpBootInfo};
 #[cfg(feature = "limine")]
 mod limine;
 
+#[cfg(test)]
+extern crate std;
+
 pub struct BootLoaderInfo<'a> {
     pub name: &'a str,
     pub version: &'a str,
@@ -96,14 +99,17 @@ pub mod mp {
 
     pub type CpuEntry = fn(usize) -> !;
 
-    // TODO: we may want to put the bsp at a known logical_id (like 0) for init purposes, ...
     /// Builds the cpu list from raw bootloader data, assigning dense [`CpuId`]s.
+    ///
+    /// The BSP (if present) gets id 0; the other cores follow ordered by `(processor_id, hw_id)`.
     pub fn assign_logical_ids(
         raw: impl IntoIterator<Item = (u64, u32)>,
         bsp_hw_id: u32,
     ) -> Box<[BootCpu]> {
         let mut raw: Vec<_> = raw.into_iter().collect();
         raw.sort_unstable();
+        // bsp gets index 0
+        raw.sort_by_key(|&(_, hw_id)| hw_id != bsp_hw_id);
         raw.into_iter()
             .enumerate()
             .map(|(index, (_, hw_id))| BootCpu {
@@ -119,6 +125,59 @@ pub mod mp {
         /// Cores, indexed by logical id.
         pub cpus: Box<[BootCpu]>,
         pub start_cpu: fn(&BootCpu, CpuEntry, usize),
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use alloc::{vec, vec::Vec};
+
+        use proptest::prelude::*;
+        use test_host::config;
+
+        use super::*;
+
+        proptest! {
+            #![proptest_config(config())]
+
+            /// Ids are exactly `0..n`: the BSP (if present) is 0, the others follow ordered by
+            /// `(processor_id, hw_id)`. The result is independent of the input order.
+            #[test]
+            fn assign_ids(
+                (raw, shuffled) in prop::collection::btree_map(any::<u32>(), 0..4u64, 0..12)
+                    .prop_flat_map(|cores| {
+                        let raw: Vec<(u64, u32)> = cores.into_iter().map(|(hw, p)| (p, hw)).collect();
+                        (Just(raw.clone()), Just(raw).prop_shuffle())
+                    }),
+                bsp_pick in any::<prop::sample::Index>(),
+                bsp_present in any::<bool>(),
+            ) {
+                let bsp_present = bsp_present && !raw.is_empty();
+                let bsp = if bsp_present {
+                    raw[bsp_pick.index(raw.len())].1
+                } else {
+                    // Not part of the system.
+                    (0..=u32::MAX).find(|h| raw.iter().all(|r| r.1 != *h)).unwrap()
+                };
+
+                let cpus = assign_logical_ids(raw.iter().copied(), bsp);
+
+                let ids: Vec<_> = cpus.iter().map(|c| c.logical_id.value()).collect();
+                prop_assert_eq!(ids, (0..raw.len()).collect::<Vec<_>>());
+                let mut hw: Vec<_> = cpus.iter().map(|c| c.hw_id).collect();
+                let mut expected_hw: Vec<_> = raw.iter().map(|r| r.1).collect();
+                hw.sort_unstable();
+                expected_hw.sort_unstable();
+                prop_assert_eq!(hw, expected_hw);
+
+                let bsps: Vec<_> = cpus.iter().filter(|c| c.is_bsp).map(|c| c.logical_id.value()).collect();
+                prop_assert_eq!(bsps, if bsp_present { vec![0] } else { vec![] });
+                let processor = |hw: u32| raw.iter().find(|r| r.1 == hw).unwrap().0;
+                let others: Vec<_> = cpus.iter().filter(|c| !c.is_bsp).map(|c| (processor(c.hw_id), c.hw_id)).collect();
+                prop_assert!(others.is_sorted());
+
+                prop_assert_eq!(assign_logical_ids(shuffled, bsp), cpus);
+            }
+        }
     }
 }
 

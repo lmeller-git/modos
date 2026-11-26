@@ -33,6 +33,7 @@ dependencies = [
  "derive_more",
  "irq-interfaces",
  "proptest",
+ "test-host",
  "thiserror",
 ]
 
@@ -49,8 +50,10 @@ dependencies = [
  "irq-interfaces",
  "mem-layout",
  "platform",
+ "proptest",
  "raw-cpuid 11.6.0",
  "spin",
+ "test-host",
  "x2apic",
  "x86_64",
 ]
@@ -99,6 +102,8 @@ name = "boot"
 version = "0.1.0"
 dependencies = [
  "limine",
+ "proptest",
+ "test-host",
 ]
 
 [[package]]
@@ -224,7 +229,9 @@ dependencies = [
  "arch",
  "linked_list_allocator",
  "mem-layout",
+ "proptest",
  "spin",
+ "test-host",
 ]
 
 [[package]]
@@ -247,7 +254,9 @@ dependencies = [
  "core_local",
  "irq-interfaces",
  "platform",
+ "proptest",
  "spin",
+ "test-host",
 ]
 
 [[package]]
@@ -255,6 +264,8 @@ name = "irq-interfaces"
 version = "0.1.0"
 dependencies = [
  "boot",
+ "proptest",
+ "test-host",
 ]
 
 [[package]]
@@ -277,6 +288,8 @@ version = "0.1.0"
 dependencies = [
  "acpi",
  "irq-interfaces",
+ "proptest",
+ "test-host",
  "x86_64",
 ]
 
@@ -368,7 +381,9 @@ dependencies = [
  "irq-interfaces",
  "kernel-acpi",
  "platform-interfaces",
+ "proptest",
  "spin",
+ "test-host",
  "uart_16550",
  "x2apic",
  "x86_64",
@@ -537,6 +552,13 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "test-host"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]
