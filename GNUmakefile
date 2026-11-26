@@ -86,7 +86,7 @@ help:
 	@echo "  test         Run all host unit tests and QEMU kernel tests"
 	@echo "  test-qemu    Run kernel tests inside QEMU (headless)"
 	@echo "  debug-test   Run QEMU kernel tests with GDB stub (-s -S)"
-	@echo "  test-host    Run host-side unit tests (requires HOST_TEST_PKGS)"
+	@echo "  test-host    Run host-side unit tests with cargo-nextest"
 	@echo "  clean        Remove cargo build directory and ISO artifacts"
 	@echo "  distclean    Remove build directory and downloaded limine/ovmf files"
 	@echo "  help         Show this usage text"
@@ -196,7 +196,7 @@ debug-test:
 # Host-side unit tests (host target)
 .PHONY: test-host
 test-host:
-	CARGO_TARGET_APPLIES_TO_HOST=false cargo test $(HOST_TEST_SELECT) --lib --target $(HOST_TARGET) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
+	CARGO_TARGET_APPLIES_TO_HOST=false cargo nextest run --no-tests=pass $(HOST_TEST_SELECT) --lib --target $(HOST_TARGET) --target-dir $(CARGO_TARGET_DIR) $(CARGO_FLAGS)
 
 .PHONY: test
 test: test-host test-qemu

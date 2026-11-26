@@ -26,6 +26,7 @@ spin = "0.10.0"
 derive_more = { version = "2.1.1", default-features = false, features = ["full"] }
 thiserror = { version = "2.0.21", default-features = false }
 x2apic = "0.5.1"
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 
 [profile.dev]
 codegen-units = 1
@@ -38,6 +39,7 @@ incremental = false
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)", "cfg(shuttle)"] }
 unnameable_types = "warn"
 unreachable_pub = "warn"
 unsafe_op_in_unsafe_fn = "warn"

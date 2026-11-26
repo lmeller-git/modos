@@ -42,6 +42,10 @@ jobs:
             sed -i '/^\s*\[profile.dev\]/a opt-level = 1' Cargo.toml
             cat Cargo.toml
         name: Enable debug symbols
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # tag=v2.90.1
+        with:
+          tool: cargo-nextest
       - name: make test-host -Zsanitizer=address
         run: make test-host
         env:
