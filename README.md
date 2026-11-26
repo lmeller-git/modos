@@ -1,3 +1,7 @@
+[![Codecov](https://codecov.io/github/lmeller-git/modos/coverage.svg?branch=main)](https://codecov.io/gh/lmeller-git/modos)
+![CI Test](https://github.com/lmeller-git/modos/actions/workflows/test.yml/badge.svg?branch=main)
+![Safety Test](https://github.com/lmeller-git/modos/actions/workflows/safety.yml/badge.svg?branch=main)
+
 # Modos
 
 A modular operatings system kernel with a shared address space.
