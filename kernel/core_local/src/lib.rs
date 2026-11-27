@@ -324,8 +324,9 @@ pub fn allocate_cls_block() -> *mut [u8] {
     let end = (&raw const __cpu_local_end) as usize;
     let size = end - start;
 
+    // a null base reads as "not published" to other cores.
     if size == 0 {
-        return ptr::slice_from_raw_parts_mut(ptr::null_mut(), 0);
+        return ptr::slice_from_raw_parts_mut(ptr::NonNull::dangling().as_ptr(), 0);
     }
 
     let padded = size.next_multiple_of(CACHE_LINE);

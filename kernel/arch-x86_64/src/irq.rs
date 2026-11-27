@@ -121,11 +121,11 @@ impl IrqDeliveryCapability for X86_64 {
 
     fn free_target(target: IrqTarget) {
         interrupts::without_interrupts(|| {
-            VECTORS
-                .get_on(target.cpu)
-                .unwrap()
-                .lock()
-                .free(target.vector as u8);
+            if let (Ok(vector), Some(map)) =
+                (u8::try_from(target.vector), VECTORS.get_on(target.cpu))
+            {
+                map.lock().free(vector);
+            }
         });
     }
 }
