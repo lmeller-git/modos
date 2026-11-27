@@ -8,11 +8,12 @@ class Violations(unittest.TestCase):
         edges = {
             "arch": {"arch-interfaces", "arch-x86_64"},
             "arch-x86_64": {"arch-interfaces", "arch-x86_64-primitives"},
-            "arch-interfaces": {"boot"},
-            "boot": set(),
+            "arch-interfaces": {"boot", "kernel-types"},
+            "boot": {"kernel-types"},
+            "kernel-types": set(),
             "core_local": {"arch-x86_64-primitives"},
             "platform": {"platform-interfaces", "platform-pc-x86_64"},
-            "kernel": {"arch", "platform"},
+            "kernel": {"arch", "platform", "kernel-types"},
         }
         self.assertEqual(violations(edges), [])
 
@@ -25,6 +26,10 @@ class Violations(unittest.TestCase):
             "interface": (
                 {"arch-interfaces": {"arch"}},
                 ["interface crate arch-interfaces depends on non-interface crate arch"],
+            ),
+            "leaf": (
+                {"kernel-types": {"boot"}},
+                ["leaf crate kernel-types depends on workspace crate boot"],
             ),
             "binary": (
                 {"early_heap": {"kernel"}},

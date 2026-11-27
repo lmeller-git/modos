@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 arch-interfaces = { path = "../arch-interfaces" }
 x86_64 = { workspace = true }
 boot = { path = "../boot" }

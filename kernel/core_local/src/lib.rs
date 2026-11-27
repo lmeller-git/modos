@@ -85,7 +85,8 @@ pub mod __private {
 }
 
 use __private::CoreLocalStorage;
-use arch_interfaces::cpu::{CpuDataCapability, CpuId};
+use arch_interfaces::cpu::CpuDataCapability;
+use kernel_types::cpu::CpuId;
 
 /// # Safety
 /// Must be safe to bitwise-copy from the `.cpu_local` template at core boot.

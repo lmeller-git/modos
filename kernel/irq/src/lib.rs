@@ -36,7 +36,6 @@ use core::{ptr, sync::atomic::Ordering};
 use arch::TargetArch;
 pub use irq_interfaces::{
     Affinity,
-    CpuId,
     IrqError,
     IrqHandler,
     IrqNum,

@@ -9,6 +9,8 @@ import subprocess
 import sys
 
 INTERFACES = {"arch-interfaces", "platform-interfaces", "irq-interfaces", "boot"}
+# Shared data types: anyone may depend on them, they depend on no workspace crate.
+LEAVES = {"kernel-types"}
 FACADES = {"arch": "arch-interfaces", "platform": "platform-interfaces"}
 # Concrete backend -> the only crates that may depend on it.
 IMPLEMENTATIONS = {
@@ -51,10 +53,17 @@ def violations(edges):
             if dep in IMPLEMENTATIONS and crate not in IMPLEMENTATIONS[dep]:
                 allowed = ", ".join(sorted(IMPLEMENTATIONS[dep]))
                 found.append(f"{crate} depends on {dep}, only {allowed} may")
-            if crate in INTERFACES and dep not in INTERFACES:
+            if crate in LEAVES:
+                found.append(f"leaf crate {crate} depends on workspace crate {dep}")
+            if crate in INTERFACES and dep not in INTERFACES | LEAVES:
                 found.append(f"interface crate {crate} depends on non-interface crate {dep}")
         if crate in FACADES:
-            extra = deps - {FACADES[crate]} - {i for i, users in IMPLEMENTATIONS.items() if crate in users}
+            extra = (
+                deps
+                - {FACADES[crate]}
+                - LEAVES
+                - {i for i, users in IMPLEMENTATIONS.items() if crate in users}
+            )
             for dep in sorted(extra):
                 found.append(f"facade {crate} depends on {dep}")
     return found

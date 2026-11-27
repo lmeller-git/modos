@@ -15,6 +15,7 @@ name = "kernel"
 test = false
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 boot = { path = "../boot" }
 arch = { path = "../arch" }
 early_heap = { path = "../early_heap" }

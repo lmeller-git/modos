@@ -1,11 +1,8 @@
 use derive_more::Display;
+use kernel_types::frame::{FRAME_4KIB_SIZE, PhysMemoryFrame, VirtMemoryFrame};
 use thiserror::Error;
 
-use crate::mm::{
-    FrameDeallocator,
-    addr::{PhysAddr, VirtAddr},
-    allocr::FrameAllocator,
-};
+use crate::mm::{FrameDeallocator, allocr::FrameAllocator};
 
 // PageFlags adapted from https://github.com/rust-osdev/x86_64/blob/master/src/addr.rs. Licensed under MIT https://github.com/rust-osdev/x86_64/blob/master/LICENSE-MIT.
 
@@ -85,117 +82,6 @@ bitflags::bitflags! {
     }
 }
 
-pub const FRAME_4KIB_SIZE: usize = 4096;
-
-pub struct PhysMemoryFrame<const SIZE: usize = FRAME_4KIB_SIZE> {
-    start: PhysAddr,
-}
-
-impl<const SIZE: usize> PhysMemoryFrame<SIZE> {
-    pub fn from_addr(addr: PhysAddr) -> Option<Self> {
-        addr.as_usize()
-            .is_multiple_of(SIZE)
-            .then_some(Self { start: addr })
-    }
-
-    pub fn start(&self) -> PhysAddr {
-        self.start
-    }
-}
-
-#[derive(Clone, Debug, Copy)]
-pub struct VirtMemoryFrame<const SIZE: usize = FRAME_4KIB_SIZE> {
-    start: VirtAddr,
-}
-
-impl<const SIZE: usize> VirtMemoryFrame<SIZE> {
-    pub fn from_addr(addr: VirtAddr) -> Option<Self> {
-        addr.as_usize()
-            .is_multiple_of(SIZE)
-            .then_some(Self { start: addr })
-    }
-
-    pub fn start(&self) -> VirtAddr {
-        self.start
-    }
-
-    pub fn containing_address(mut addr: VirtAddr) -> Self {
-        addr.align_down(SIZE);
-        Self { start: addr }
-    }
-
-    pub fn range(
-        start: VirtMemoryFrame<SIZE>,
-        end: VirtMemoryFrame<SIZE>,
-    ) -> VirtMemoryFrameRange<SIZE> {
-        VirtMemoryFrameRange { start, end }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VirtMemoryFrameRange<const SIZE: usize = FRAME_4KIB_SIZE> {
-    start: VirtMemoryFrame<SIZE>,
-    end: VirtMemoryFrame<SIZE>,
-}
-
-impl<const SIZE: usize> VirtMemoryFrameRange<SIZE> {
-    pub fn is_empty(&self) -> bool {
-        self.end.start <= self.start.start
-    }
-
-    pub fn len(&self) -> usize {
-        if !self.is_empty() {
-            (self.end.start.as_usize() - self.start.start.as_usize()) / SIZE
-        } else {
-            0
-        }
-    }
-}
-
-impl<const SIZE: usize> IntoIterator for VirtMemoryFrameRange<SIZE> {
-    type IntoIter = VirtMemoryFrameRangeIter<SIZE>;
-    type Item = VirtMemoryFrame<SIZE>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        VirtMemoryFrameRangeIter(self)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct VirtMemoryFrameRangeIter<const SIZE: usize = FRAME_4KIB_SIZE>(
-    VirtMemoryFrameRange<SIZE>,
-);
-
-impl<const SIZE: usize> Iterator for VirtMemoryFrameRangeIter<SIZE> {
-    type Item = VirtMemoryFrame<SIZE>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.0.start.start < self.0.end.start {
-            let page = self.0.start;
-            self.0.start.start = self.0.start.start + SIZE;
-            Some(page)
-        } else {
-            None
-        }
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if n >= self.0.len() {
-            self.0.start = self.0.end;
-            return None;
-        }
-        // n < len, so n * SIZE stays inside the range.
-        self.0.start.start = self.0.start.start + n * SIZE;
-        self.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.0.len();
-        (len, Some(len))
-    }
-}
-
 #[derive(Error, Debug)]
 pub enum PageTableError {
     #[error(transparent)]
@@ -256,16 +142,7 @@ pub trait TLBFlushCapability {
 
 #[cfg(test)]
 mod tests {
-    use alloc::vec::Vec;
-
-    use proptest::prelude::*;
-    use test_host::{config, edge_addr};
-
     use super::*;
-
-    const KIB4: usize = FRAME_4KIB_SIZE;
-    const MIB2: usize = 2 << 20;
-    const GIB1: usize = 1 << 30;
 
     mod page_flags {
         use super::*;
@@ -302,127 +179,6 @@ mod tests {
             // Physical address bits of an entry are never representable as flags.
             let addr_bits = ((1u64 << 52) - 1) & !0xfff;
             assert_eq!(PageFlags::all().bits() & addr_bits, 0);
-        }
-    }
-
-    mod frame {
-        use super::*;
-
-        fn containing<const SIZE: usize>(raw: usize) {
-            let start = VirtMemoryFrame::<SIZE>::containing_address(VirtAddr::new(raw))
-                .start()
-                .as_usize();
-            assert_eq!(start, raw - raw % SIZE);
-        }
-
-        /// Aligned addresses are accepted unchanged, unaligned ones rejected.
-        fn from_addr<const SIZE: usize>(raw: usize) {
-            let virt = VirtMemoryFrame::<SIZE>::from_addr(VirtAddr::new(raw));
-            let phys = PhysMemoryFrame::<SIZE>::from_addr(PhysAddr::new(raw));
-            let expected = raw.is_multiple_of(SIZE).then_some(raw);
-
-            assert_eq!(virt.map(|f| f.start().as_usize()), expected);
-            assert_eq!(phys.map(|f| f.start().as_usize()), expected);
-        }
-
-        proptest! {
-            #![proptest_config(config())]
-
-            #[test]
-            fn containing_address(
-                raw in (edge_addr(KIB4), edge_addr(MIB2), edge_addr(GIB1)),
-            ) {
-                containing::<KIB4>(raw.0);
-                containing::<MIB2>(raw.1);
-                containing::<GIB1>(raw.2);
-            }
-
-            #[test]
-            fn from_addr_alignment(
-                raw in (edge_addr(KIB4), edge_addr(MIB2)),
-            ) {
-                from_addr::<KIB4>(raw.0);
-                from_addr::<MIB2>(raw.1);
-            }
-        }
-    }
-
-    mod range {
-        use super::*;
-
-        const MAX_SPAN: usize = 64;
-
-        /// `[start, end)` as frame indices: anywhere in the low address space or at the very
-        /// top, with `a`/`b` unordered so empty and inverted ranges occur.
-        fn range<const SIZE: usize>(
-            top: bool,
-            base: usize,
-            a: usize,
-            b: usize,
-        ) -> VirtMemoryFrameRange<SIZE> {
-            let last = usize::MAX / SIZE;
-            let base = if top {
-                last - MAX_SPAN - base % 4
-            } else {
-                base % (1 << 20)
-            };
-            let frame =
-                |i: usize| VirtMemoryFrame::<SIZE>::from_addr(VirtAddr::new((base + i) * SIZE));
-            VirtMemoryFrame::range(frame(a).unwrap(), frame(b).unwrap())
-        }
-
-        fn starts<const SIZE: usize>(
-            iter: impl Iterator<Item = VirtMemoryFrame<SIZE>>,
-        ) -> Vec<usize> {
-            iter.map(|f| f.start().as_usize()).collect()
-        }
-
-        fn reference<const SIZE: usize>(r: &VirtMemoryFrameRange<SIZE>) -> Vec<usize> {
-            let (s, e) = (r.start.start.as_usize(), r.end.start.as_usize());
-            (s..e).step_by(SIZE).collect()
-        }
-
-        fn yields_in_order<const SIZE: usize>(r: VirtMemoryFrameRange<SIZE>) {
-            let expected = reference(&r);
-            assert_eq!(r.is_empty(), expected.is_empty());
-            assert_eq!(starts(r.into_iter()), expected);
-        }
-
-        fn exact_size<const SIZE: usize>(r: VirtMemoryFrameRange<SIZE>) {
-            let count = reference(&r).len();
-            assert_eq!(r.len(), count);
-            assert_eq!(r.into_iter().size_hint(), (count, Some(count)));
-        }
-
-        /// `nth(n)` is `skip(n).next()`, and iteration resumes after the skipped frames.
-        fn nth<const SIZE: usize>(r: VirtMemoryFrameRange<SIZE>, n: usize) {
-            let all = reference(&r);
-            let mut iter = r.into_iter();
-
-            assert_eq!(
-                iter.nth(n).map(|f| f.start().as_usize()),
-                all.get(n).copied()
-            );
-            assert_eq!(
-                starts(iter),
-                all.into_iter().skip(n + 1).collect::<Vec<_>>()
-            );
-        }
-
-        proptest! {
-            #![proptest_config(config())]
-
-            #[test]
-            fn iteration(
-                top: bool, base: usize, a in 0..MAX_SPAN, b in 0..MAX_SPAN, n in 0..MAX_SPAN + 6,
-            ) {
-                yields_in_order(range::<KIB4>(top, base, a, b));
-                yields_in_order(range::<MIB2>(top, base, a, b));
-                exact_size(range::<KIB4>(top, base, a, b));
-                exact_size(range::<MIB2>(top, base, a, b));
-                nth(range::<KIB4>(top, base, a, b), n);
-                nth(range::<MIB2>(top, base, a, b), n);
-            }
         }
     }
 }

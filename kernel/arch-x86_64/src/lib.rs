@@ -14,7 +14,7 @@ use core::{
 };
 
 use arch_interfaces::{
-    cpu::{CpuDataCapability, CpuId, SmpCapability},
+    cpu::{CpuDataCapability, SmpCapability},
     init::InitCapability,
     interrupt::InterruptHandlerCapability,
     mm::{
@@ -26,8 +26,6 @@ use arch_interfaces::{
         MemUnmapperCapability,
         PageTableError,
         PageTableErrorKind,
-        PhysAddr,
-        PhysMemoryFrame,
         TLBFlushCapability,
     },
 };
@@ -36,6 +34,10 @@ use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, m
 use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
 use early_log::early_println;
+use kernel_types::{
+    cpu::CpuId,
+    frame::{FRAME_4KIB_SIZE, PhysMemoryFrame, VirtMemoryFrame},
+};
 use platform::TargetPlatform;
 use x86_64::{
     instructions::interrupts::{self, without_interrupts},
@@ -47,8 +49,6 @@ use x86_64::{
         FrameAllocator,
         FrameDeallocator,
         Mapper,
-        Page,
-        PageSize,
         PageTableFlags,
         PhysFrame,
         Size4KiB,
@@ -62,6 +62,7 @@ use crate::{
 };
 
 mod apic;
+mod conv;
 pub(crate) mod frame;
 mod gdt;
 mod idt;
@@ -361,28 +362,21 @@ extern "C" fn ap_main(my_packet: &'static mut CPUStartupData) -> ! {
     (entry)()
 }
 
-impl FrameAllocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
-    fn allocate() -> Option<PhysMemoryFrame<{ Size4KiB::SIZE as usize }>> {
+impl FrameAllocatorCapability<FRAME_4KIB_SIZE> for X86_64 {
+    fn allocate() -> Option<PhysMemoryFrame> {
         frame::get_frame_alloc()
             .lock()
             .allocate_frame()
-            .and_then(|frame| {
-                PhysMemoryFrame::from_addr(PhysAddr::new(frame.start_address().as_u64() as usize))
-            })
+            .map(conv::from_x86_frame)
     }
 }
 
-impl FrameDeallocatorCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
-    unsafe fn deallocate(
-        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<(), FrameDeallocationError> {
+impl FrameDeallocatorCapability<FRAME_4KIB_SIZE> for X86_64 {
+    unsafe fn deallocate(frame: PhysMemoryFrame) -> Result<(), FrameDeallocationError> {
         unsafe {
-            frame::get_frame_alloc().lock().deallocate_frame(
-                PhysFrame::<Size4KiB>::from_start_address(x86_64::PhysAddr::new(
-                    frame.start().as_usize() as u64,
-                ))
-                .map_err(|_| FrameDeallocationError::InvalidFrame)?,
-            );
+            frame::get_frame_alloc()
+                .lock()
+                .deallocate_frame(conv::to_x86_frame(frame));
         };
         Ok(())
     }
@@ -392,33 +386,26 @@ struct FrameAllocView<'a, T>(&'a mut T);
 
 unsafe impl<'a, T> FrameAllocator<Size4KiB> for FrameAllocView<'a, T>
 where
-    T: arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>,
+    T: arch_interfaces::mm::FrameAllocator<FRAME_4KIB_SIZE>,
 {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        self.0.allocate().map(|frame| {
-            PhysFrame::from_start_address(x86_64::PhysAddr::new(frame.start().as_usize() as u64))
-                .unwrap()
-        })
+        self.0.allocate().map(conv::to_x86_frame)
     }
 }
 
-impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+impl MemMapperCapability<FRAME_4KIB_SIZE> for X86_64 {
     unsafe fn map_to(
-        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        page: VirtMemoryFrame,
+        frame: PhysMemoryFrame,
         flags: arch_interfaces::mm::PageFlags,
-        frame_allocator: &mut impl arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>,
+        frame_allocator: &mut impl arch_interfaces::mm::FrameAllocator<FRAME_4KIB_SIZE>,
     ) -> Result<Self::Flush, PageTableError> {
         unsafe {
             page::get_pagetable()
                 .lock()
                 .map_to(
-                    Page::from_start_address(x86_64::VirtAddr::new(page.start().as_usize() as u64))
-                        .unwrap(),
-                    PhysFrame::<Size4KiB>::from_start_address(x86_64::PhysAddr::new(
-                        frame.start().as_usize() as u64,
-                    ))
-                    .unwrap(),
+                    conv::to_x86_page(page),
+                    conv::to_x86_frame(frame),
                     page_table_flags(flags),
                     &mut FrameAllocView(frame_allocator),
                 )
@@ -427,8 +414,8 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     }
 
     unsafe fn map_to_global(
-        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
+        page: VirtMemoryFrame,
+        frame: PhysMemoryFrame,
         flags: arch_interfaces::mm::PageFlags,
     ) -> Result<Self::Flush, PageTableError> {
         unsafe {
@@ -442,28 +429,15 @@ impl MemMapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
     }
 }
 
-impl MemUnmapperCapability<{ Size4KiB::SIZE as usize }> for X86_64 {
+impl MemUnmapperCapability<FRAME_4KIB_SIZE> for X86_64 {
     fn unmap(
-        page: arch_interfaces::mm::VirtMemoryFrame<{ Size4KiB::SIZE as usize }>,
-        _frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<(PhysMemoryFrame<{ Size4KiB::SIZE as usize }>, Self::Flush), PageTableError> {
+        page: VirtMemoryFrame,
+        _frame_deallocator: &mut impl arch_interfaces::mm::FrameDeallocator<FRAME_4KIB_SIZE>,
+    ) -> Result<(PhysMemoryFrame, Self::Flush), PageTableError> {
         page::get_pagetable()
             .lock()
-            .unmap(
-                Page::<Size4KiB>::from_start_address(x86_64::VirtAddr::new(
-                    page.start().as_usize() as u64,
-                ))
-                .unwrap(),
-            )
-            .map(|(frame, flush)| {
-                (
-                    PhysMemoryFrame::from_addr(PhysAddr::new(
-                        frame.start_address().as_u64() as usize
-                    ))
-                    .unwrap(),
-                    flush,
-                )
-            })
+            .unmap(conv::to_x86_page(page))
+            .map(|(frame, flush)| (conv::from_x86_frame(frame), flush))
             .map_err(|_| PageTableError::Simple(PageTableErrorKind::None))
     }
 }

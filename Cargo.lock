@@ -32,8 +32,7 @@ dependencies = [
  "boot",
  "derive_more",
  "irq-interfaces",
- "proptest",
- "test-host",
+ "kernel-types",
  "thiserror",
 ]
 
@@ -48,6 +47,7 @@ dependencies = [
  "core_local",
  "early-log",
  "irq-interfaces",
+ "kernel-types",
  "mem-layout",
  "platform",
  "proptest",
@@ -64,6 +64,7 @@ version = "0.1.0"
 dependencies = [
  "arch-interfaces",
  "boot",
+ "kernel-types",
  "x86_64",
 ]
 
@@ -101,6 +102,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 name = "boot"
 version = "0.1.0"
 dependencies = [
+ "kernel-types",
  "limine",
  "proptest",
  "test-host",
@@ -172,6 +174,7 @@ dependencies = [
  "arch-interfaces",
  "arch-x86_64-primitives",
  "core_local_macros",
+ "kernel-types",
 ]
 
 [[package]]
@@ -227,6 +230,7 @@ name = "early_heap"
 version = "0.1.0"
 dependencies = [
  "arch",
+ "kernel-types",
  "linked_list_allocator",
  "mem-layout",
  "proptest",
@@ -253,6 +257,7 @@ dependencies = [
  "arch",
  "core_local",
  "irq-interfaces",
+ "kernel-types",
  "platform",
  "proptest",
  "spin",
@@ -263,7 +268,7 @@ dependencies = [
 name = "irq-interfaces"
 version = "0.1.0"
 dependencies = [
- "boot",
+ "kernel-types",
  "proptest",
  "test-host",
 ]
@@ -278,6 +283,7 @@ dependencies = [
  "early-log",
  "early_heap",
  "irq",
+ "kernel-types",
  "platform",
  "x86_64",
 ]
@@ -291,6 +297,15 @@ dependencies = [
  "proptest",
  "test-host",
  "x86_64",
+]
+
+[[package]]
+name = "kernel-types"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "proptest",
+ "test-host",
 ]
 
 [[package]]
@@ -380,6 +395,7 @@ version = "0.1.0"
 dependencies = [
  "irq-interfaces",
  "kernel-acpi",
+ "kernel-types",
  "platform-interfaces",
  "proptest",
  "spin",

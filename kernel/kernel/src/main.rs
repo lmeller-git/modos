@@ -13,7 +13,7 @@ use arch::interface::{
     init::InitCapability,
 };
 use early_log::early_println;
-use irq::CpuId;
+use kernel_types::cpu::CpuId;
 use platform::{
     TargetPlatform,
     interface::power::{ExitCode, ShutdownCapability},

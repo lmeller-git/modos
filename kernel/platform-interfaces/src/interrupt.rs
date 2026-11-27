@@ -2,7 +2,7 @@
 //!
 //! Interface as needed by the `irq` crate.
 
-pub use irq_interfaces::{CpuId, IrqError, IrqSpec, IrqTarget, Polarity, TriggerMode};
+pub use irq_interfaces::{IrqError, IrqSpec, IrqTarget, Polarity, TriggerMode};
 
 /// Controller-side interrupt routing
 ///

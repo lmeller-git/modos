@@ -1,5 +1,5 @@
-pub use boot::mp::CpuId;
 use boot::{LateBootInfo, mp::BootCpu};
+use kernel_types::cpu::CpuId;
 
 /// Architectures supporting this can be queried for various information regarding cpu topology and core state.
 pub trait CpuDataCapability {

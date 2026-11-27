@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 irq-interfaces = { path = "../irq-interfaces" }
 arch = { path = "../arch" }
 core_local = { path = "../core_local" }

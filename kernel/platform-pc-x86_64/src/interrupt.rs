@@ -5,13 +5,8 @@
 
 use irq_interfaces::x86::IsaIrqCapability;
 use kernel_acpi::{InterruptConfig, InterruptConfigError, MapMmioFn, NanosFn};
-use platform_interfaces::interrupt::{
-    CpuId,
-    InterruptControllerCapability,
-    IrqError,
-    IrqSpec,
-    IrqTarget,
-};
+use kernel_types::cpu::CpuId;
+use platform_interfaces::interrupt::{InterruptControllerCapability, IrqError, IrqSpec, IrqTarget};
 
 use crate::{PcX86_64, ioapic, pic};
 

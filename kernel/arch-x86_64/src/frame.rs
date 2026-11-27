@@ -1,8 +1,9 @@
 use core::ptr::null_mut;
 
-use arch_interfaces::mm::{FrameDeallocationError, PhysMemoryFrame};
+use arch_interfaces::mm::FrameDeallocationError;
 use boot::memmap::{Entry, MEMMAP_BOOTLOADER_RECLAIMABLE, MEMMAP_USABLE};
 use conquer_once::spin::OnceCell;
+use kernel_types::frame::{FRAME_4KIB_SIZE, PhysMemoryFrame};
 use spin::Mutex;
 use x86_64::{
     PhysAddr,
@@ -10,6 +11,8 @@ use x86_64::{
     align_up,
     structures::paging::{FrameAllocator, FrameDeallocator, PageSize, PhysFrame, Size4KiB},
 };
+
+use crate::conv;
 
 pub(crate) static FRAME_ALLOC: OnceCell<Mutex<LinkedListFrameAllocator>> = OnceCell::uninit();
 
@@ -44,8 +47,7 @@ impl LinkedListFrameAllocator {
             .iter()
             .filter(|e| is_usable(e) || is_reclaimable(e))
             .count();
-        let table_bytes =
-            (capacity * size_of::<Region>()).next_multiple_of(Size4KiB::SIZE as usize);
+        let table_bytes = (capacity * size_of::<Region>()).next_multiple_of(FRAME_4KIB_SIZE);
 
         // TODO:
         // We reverse the memmap here, because for some reason low regions are marked as useable while being used by limine at the same time.
@@ -120,10 +122,10 @@ impl LinkedListFrameAllocator {
             return false;
         };
 
-        let bytes = (FRAMES_PER_BATCH * Size4KiB::SIZE as usize).min(region.len);
+        let bytes = (FRAMES_PER_BATCH * FRAME_4KIB_SIZE).min(region.len);
 
-        debug_assert_eq!(bytes % Size4KiB::SIZE as usize, 0);
-        debug_assert!(bytes >= Size4KiB::SIZE as usize);
+        debug_assert_eq!(bytes % FRAME_4KIB_SIZE, 0);
+        debug_assert!(bytes >= FRAME_4KIB_SIZE);
 
         let start = region.base;
         region.base += bytes;
@@ -131,7 +133,7 @@ impl LinkedListFrameAllocator {
 
         let mut addr = start + bytes;
         while addr > start {
-            addr -= Size4KiB::SIZE as usize;
+            addr -= FRAME_4KIB_SIZE;
             unsafe {
                 self.deallocate_frame(PhysFrame::containing_address(PhysAddr::new(addr as u64)));
             }
@@ -168,7 +170,7 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
 
         let frame = PhysFrame::containing_address(PhysAddr::new(current_phys));
         unsafe {
-            core::ptr::write_bytes(next_head_ptr.cast::<u8>(), 0, Size4KiB::SIZE as usize);
+            core::ptr::write_bytes(next_head_ptr.cast::<u8>(), 0, FRAME_4KIB_SIZE);
         }
         Some(frame)
     }
@@ -176,35 +178,21 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
 
 pub(crate) struct X86FrameAllocView<'a, A>(pub(crate) &'a mut A);
 
-impl<'a, A> arch_interfaces::mm::FrameAllocator<{ Size4KiB::SIZE as usize }>
-    for X86FrameAllocView<'a, A>
+impl<'a, A> arch_interfaces::mm::FrameAllocator<FRAME_4KIB_SIZE> for X86FrameAllocView<'a, A>
 where
     A: FrameAllocator<Size4KiB>,
 {
-    fn allocate(&mut self) -> Option<PhysMemoryFrame<{ Size4KiB::SIZE as usize }>> {
-        self.0.allocate_frame().and_then(|frame| {
-            PhysMemoryFrame::from_addr(arch_interfaces::mm::PhysAddr::new(
-                frame.start_address().as_u64() as usize,
-            ))
-        })
+    fn allocate(&mut self) -> Option<PhysMemoryFrame> {
+        self.0.allocate_frame().map(conv::from_x86_frame)
     }
 }
 
-impl<'a, A> arch_interfaces::mm::FrameDeallocator<{ Size4KiB::SIZE as usize }>
-    for X86FrameAllocView<'a, A>
+impl<'a, A> arch_interfaces::mm::FrameDeallocator<FRAME_4KIB_SIZE> for X86FrameAllocView<'a, A>
 where
     A: FrameDeallocator<Size4KiB>,
 {
-    unsafe fn deallocate(
-        &mut self,
-        frame: PhysMemoryFrame<{ Size4KiB::SIZE as usize }>,
-    ) -> Result<(), FrameDeallocationError> {
-        unsafe {
-            self.0.deallocate_frame(
-                PhysFrame::from_start_address(PhysAddr::new(frame.start().as_usize() as u64))
-                    .map_err(|_| FrameDeallocationError::InvalidFrame)?,
-            );
-        }
+    unsafe fn deallocate(&mut self, frame: PhysMemoryFrame) -> Result<(), FrameDeallocationError> {
+        unsafe { self.0.deallocate_frame(conv::to_x86_frame(frame)) };
         Ok(())
     }
 }
@@ -226,7 +214,7 @@ mod tests {
 
     use super::*;
 
-    const PAGE: usize = Size4KiB::SIZE as usize;
+    const PAGE: usize = FRAME_4KIB_SIZE;
     /// Fake physical address of the first arena byte.
     const PHYS_BASE: usize = 0x10_0000;
     const FILL: u8 = 0xAB;
@@ -499,9 +487,9 @@ mod tests {
 
         let start = arch_interfaces::mm::FrameAllocator::allocate(&mut view)
             .unwrap()
-            .start();
+            .get();
         let free = |view: &mut X86FrameAllocView<'_, _>| unsafe {
-            let frame = PhysMemoryFrame::from_addr(start).unwrap();
+            let frame = PhysMemoryFrame::new(start).unwrap();
             arch_interfaces::mm::FrameDeallocator::deallocate(view, frame)
         };
         assert_eq!(free(&mut view), Ok(()));

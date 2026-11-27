@@ -7,14 +7,9 @@ extern crate std;
 
 use arch::{
     TargetArch,
-    interface::mm::{
-        FrameAllocatorCapability,
-        MemMapperCapability,
-        PageFlags,
-        VirtAddr,
-        VirtMemoryFrame,
-    },
+    interface::mm::{FrameAllocatorCapability, MemMapperCapability, PageFlags},
 };
+use kernel_types::{addr::VirtAddr, frame::VirtMemoryFrame};
 use mem_layout::{KERNEL_HEAP_SIZE, KERNEL_HEAP_START};
 
 use crate::linked_list::SafeHeap;
@@ -232,8 +227,8 @@ pub fn init(alloc: &SafeHeap) {
     let page_range = {
         let heap_start = VirtAddr::new(KERNEL_HEAP_START);
         let heap_end = heap_start + KERNEL_HEAP_SIZE;
-        let heap_start_page = VirtMemoryFrame::containing_address(heap_start);
-        let heap_end_page = VirtMemoryFrame::containing_address(heap_end);
+        let heap_start_page = VirtMemoryFrame::containing(heap_start);
+        let heap_end_page = VirtMemoryFrame::containing(heap_end);
         VirtMemoryFrame::range(heap_start_page, heap_end_page)
     };
 

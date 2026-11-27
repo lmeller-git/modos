@@ -3,7 +3,6 @@
 use alloc::vec::Vec;
 
 use irq_interfaces::{
-    CpuId,
     IrqError,
     IrqSpec,
     IrqTarget,
@@ -12,6 +11,7 @@ use irq_interfaces::{
     x86::{IoApicInfo, IsaOverride},
 };
 use kernel_acpi::{InterruptConfig, MapMmioFn};
+use kernel_types::cpu::CpuId;
 use spin::{Mutex, Once};
 use x2apic::ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry};
 use x86_64::instructions::interrupts;

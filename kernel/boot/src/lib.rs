@@ -70,31 +70,14 @@ pub mod memmap {
 pub mod mp {
     use alloc::{boxed::Box, vec::Vec};
 
+    use kernel_types::cpu::CpuId;
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
     #[repr(C)]
     pub struct BootCpu {
         pub logical_id: CpuId,
         pub hw_id: u32,
         pub is_bsp: bool,
-    }
-
-    /// Logical ID of a CPU core.
-    ///
-    /// The ids of a system with `n` cores are exactly `0..n`.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(transparent)]
-    pub struct CpuId(usize);
-
-    impl CpuId {
-        /// Returns the raw logical id.
-        pub const fn value(self) -> usize {
-            self.0
-        }
-
-        /// Constructs a [`CpuId`] from a raw logical id.
-        pub const fn new(raw: usize) -> Self {
-            Self(raw)
-        }
     }
 
     pub type CpuEntry = fn(usize) -> !;

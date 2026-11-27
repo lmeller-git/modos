@@ -1,4 +1,4 @@
-use crate::mm::{FRAME_4KIB_SIZE, map::PhysMemoryFrame};
+use kernel_types::frame::{FRAME_4KIB_SIZE, PhysMemoryFrame};
 
 pub trait FrameAllocator<const SIZE: usize> {
     fn allocate(&mut self) -> Option<PhysMemoryFrame<SIZE>>;

@@ -1,0 +1,21 @@
+[package]
+name = "kernel-types"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+derive_more = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+test-host = { path = "../test-host" }
+
+[lints]
+workspace = true

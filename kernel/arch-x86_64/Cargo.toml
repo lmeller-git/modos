@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 spin = { workspace = true }
 x86_64 = { workspace = true }
 boot = { path = "../boot" }

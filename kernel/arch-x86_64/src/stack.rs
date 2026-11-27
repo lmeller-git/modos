@@ -10,10 +10,10 @@ use mem_layout::{
 };
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageSize, PageTableFlags, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
-const PAGE: usize = Size4KiB::SIZE as usize;
+const PAGE: usize = kernel_types::frame::FRAME_4KIB_SIZE;
 
 /// `count` stacks of `size` bytes from `start`, each preceded by a guard page.
 #[derive(Clone, Copy, Debug)]

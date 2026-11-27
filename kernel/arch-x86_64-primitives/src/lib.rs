@@ -6,8 +6,9 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use arch_interfaces::cpu::{CpuDataCapability, CpuId};
+use arch_interfaces::cpu::CpuDataCapability;
 use boot::mp::BootCpu;
+use kernel_types::cpu::CpuId;
 use x86_64::{
     registers::model_specific::GsBase,
     structures::{

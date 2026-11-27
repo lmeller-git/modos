@@ -15,6 +15,7 @@ default = ["qemu-platform"]
 qemu-platform = []
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 platform-interfaces = { path = "../platform-interfaces" }
 irq-interfaces = { path = "../irq-interfaces" }
 kernel-acpi = { path = "../acpi" }

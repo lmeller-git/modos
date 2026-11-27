@@ -9,8 +9,9 @@ use core::{
 
 use arch::{TargetArch, interface::interrupt::IrqDeliveryCapability};
 use core_local::CLSLazyPtr;
+use kernel_types::cpu::CpuId;
 
-use crate::{CpuId, Desc, IrqError, IrqNum, IrqTarget, sync::ReadGuard};
+use crate::{Desc, IrqError, IrqNum, IrqTarget, sync::ReadGuard};
 
 const VECTORS: usize = <TargetArch as IrqDeliveryCapability>::MAX_VECTORS;
 

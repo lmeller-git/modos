@@ -11,6 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 arch = { path = "../arch" }
 linked_list_allocator = "0.10.5"
 spin = { workspace = true }

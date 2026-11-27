@@ -2,6 +2,7 @@
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use kernel_types::frame::FRAME_4KIB_SIZE;
 use mem_layout::{MMIO_MAX_SIZE, MMIO_START};
 use x86_64::{
     PhysAddr,
@@ -46,8 +47,8 @@ fn plan_window(cursor: usize, phys: u64, len: usize) -> Result<Window, PlanError
         return Err(PlanError::PhysRange);
     }
 
-    let page_size = Size4KiB::SIZE as usize;
-    let page_offset = (phys & (Size4KiB::SIZE - 1)) as usize;
+    let page_size = FRAME_4KIB_SIZE;
+    let page_offset = crate::conv::to_usize(phys & (Size4KiB::SIZE - 1));
     // Cannot overflow: `len < 2^52`.
     let total_bytes = (page_offset + len).next_multiple_of(page_size);
 

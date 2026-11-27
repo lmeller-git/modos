@@ -11,8 +11,7 @@ use core::{
 };
 
 use core_local::CLSAtomic;
-
-use crate::CpuId;
+use kernel_types::cpu::CpuId;
 
 /// Odd while this CPU is inside a read-side section.
 ///

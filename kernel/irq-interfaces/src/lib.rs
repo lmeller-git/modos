@@ -15,7 +15,7 @@ extern crate alloc;
 #[cfg(target_arch = "x86_64")]
 pub mod x86;
 
-pub use boot::mp::CpuId;
+use kernel_types::cpu::CpuId;
 
 /// How the interrupt source is triggered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

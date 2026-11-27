@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-boot = { path = "../boot" }
+kernel-types = { path = "../kernel-types" }
 
 [dev-dependencies]
 proptest = { workspace = true }

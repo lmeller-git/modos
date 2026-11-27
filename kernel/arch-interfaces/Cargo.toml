@@ -11,15 +11,12 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 derive_more = { workspace = true }
 bitflags = { workspace = true }
 thiserror = { workspace = true }
 boot = { path = "../boot" }
 irq-interfaces = { path = "../irq-interfaces" }
-
-[dev-dependencies]
-proptest = { workspace = true }
-test-host = { path = "../test-host" }
 
 [lints]
 workspace = true
