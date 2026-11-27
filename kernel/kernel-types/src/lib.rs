@@ -11,3 +11,5 @@ pub mod addr;
 pub mod aligned;
 pub mod cpu;
 pub mod frame;
+#[cfg(feature = "hhdm")]
+pub mod hhdm;

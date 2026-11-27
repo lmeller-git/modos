@@ -6,6 +6,4 @@ pub mod interrupt;
 pub mod mm;
 
 #[cfg(test)]
-extern crate alloc;
-#[cfg(test)]
 extern crate std;

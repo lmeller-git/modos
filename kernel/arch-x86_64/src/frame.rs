@@ -1,23 +1,22 @@
-use core::ptr::null_mut;
+use core::ptr::NonNull;
 
 use arch_interfaces::mm::FrameDeallocationError;
-use boot::memmap::{Entry, MEMMAP_BOOTLOADER_RECLAIMABLE, MEMMAP_USABLE};
+use boot::memmap::{MemoryMap, RegionKind};
 use conquer_once::spin::OnceCell;
-use kernel_types::frame::{FRAME_4KIB_SIZE, PhysMemoryFrame};
-use spin::Mutex;
-use x86_64::{
-    PhysAddr,
-    align_down,
-    align_up,
-    structures::paging::{FrameAllocator, FrameDeallocator, PageSize, PhysFrame, Size4KiB},
+use kernel_types::{
+    addr::{PhysAddr, VirtAddr},
+    frame::{FRAME_4KIB_SIZE, PhysMemoryFrame, PhysMemoryFrameRange},
+    hhdm::Hhdm,
 };
+use spin::Mutex;
+use x86_64::structures::paging::{FrameAllocator, FrameDeallocator, PhysFrame, Size4KiB};
 
 use crate::conv;
 
 pub(crate) static FRAME_ALLOC: OnceCell<Mutex<LinkedListFrameAllocator>> = OnceCell::uninit();
 
-pub(crate) fn init_frame_alloc<'a>(memmap: &'a [&'a Entry], hhdm_offset: usize) {
-    FRAME_ALLOC.init_once(|| Mutex::new(LinkedListFrameAllocator::new(memmap, hhdm_offset)));
+pub(crate) fn init_frame_alloc(memmap: &MemoryMap<'_>, hhdm: Hhdm) {
+    FRAME_ALLOC.init_once(|| Mutex::new(LinkedListFrameAllocator::new(memmap, hhdm)));
 }
 
 pub(crate) fn get_frame_alloc<'a>()
@@ -25,120 +24,109 @@ pub(crate) fn get_frame_alloc<'a>()
     FRAME_ALLOC.get().unwrap()
 }
 
-#[derive(Clone, Copy)]
-struct Region {
-    base: usize,
-    len: usize,
-}
-
 pub(crate) struct LinkedListFrameAllocator {
-    head: *mut u64,
-    regions: &'static mut [Region], // we allocate this in an empty frame at init
-    hhdm_offset: usize,
+    /// Free list through the frames themselves, by HHDM address.
+    head: Option<NonNull<usize>>,
+    /// Frames not yet on the free list. Allocated in an empty frame at init.
+    regions: &'static mut [PhysMemoryFrameRange],
+    hhdm: Hhdm,
     count: usize,
 }
 
 impl LinkedListFrameAllocator {
-    fn new<'a>(memmap: &'a [&'a Entry], hhdm_offset: usize) -> Self {
-        let is_usable = |e: &&&Entry| e.type_ == MEMMAP_USABLE;
-        let is_reclaimable = |e: &&&Entry| e.type_ == MEMMAP_BOOTLOADER_RECLAIMABLE;
+    fn new(memmap: &MemoryMap<'_>, hhdm: Hhdm) -> Self {
+        let is_usable = |kind| kind == RegionKind::Usable;
 
         let capacity = memmap
-            .iter()
-            .filter(|e| is_usable(e) || is_reclaimable(e))
+            .regions()
+            .filter(|r| {
+                matches!(
+                    r.kind(),
+                    RegionKind::Usable | RegionKind::BootloaderReclaimable
+                )
+            })
             .count();
-        let table_bytes = (capacity * size_of::<Region>()).next_multiple_of(FRAME_4KIB_SIZE);
+        let table_frames = (capacity * size_of::<PhysMemoryFrameRange>()).div_ceil(FRAME_4KIB_SIZE);
 
         // TODO:
         // We reverse the memmap here, because for some reason low regions are marked as useable while being used by limine at the same time.
         // If we allocate these regions to heap, ... while we still use tehm (bootinfo, ...) we may crash.
         // Should consult docs for a more robust fix here.
-        let host = memmap
-            .iter()
+        let (host_index, host) = memmap
+            .regions()
             .rev()
-            .find(|e| is_usable(e) && e.length as usize >= table_bytes)
+            .enumerate()
+            .find(|(_, r)| is_usable(r.kind()) && r.frames().len() >= table_frames)
             .expect("no usable region can host the region table");
+        let table = host.frames().take_front(table_frames).start().get();
 
-        assert_eq!(host.base, align_up(host.base, Size4KiB::SIZE));
-        let ptr = (hhdm_offset + host.base as usize) as *mut Region;
-        unsafe { core::ptr::write_bytes(ptr.cast::<u8>(), 0, table_bytes) };
-        let regions = unsafe { core::slice::from_raw_parts_mut(ptr, capacity) };
+        let ptr = hhdm
+            .ptr::<PhysMemoryFrameRange>(table)
+            .expect("region table outside the HHDM");
+        // SAFETY: the table frames are usable memory, mapped by the HHDM, and handed out by no one
+        // else. An all-zero `PhysMemoryFrameRange` is a valid (empty) range.
+        let regions = unsafe {
+            ptr.cast::<u8>()
+                .write_bytes(0, table_frames * FRAME_4KIB_SIZE);
+            core::slice::from_raw_parts_mut(ptr.as_ptr(), capacity)
+        };
 
         let mut count = 0;
-        for e in memmap.iter().rev().filter(is_usable) {
-            let mut base = align_up(e.base, Size4KiB::SIZE) as usize;
-            let end = align_down(e.base + e.length, Size4KiB::SIZE) as usize;
+        for (index, region) in memmap
+            .regions()
+            .rev()
+            .enumerate()
+            .filter(|(_, r)| is_usable(r.kind()))
+        {
+            let mut frames = region.frames();
 
-            if core::ptr::eq(*e, *host) {
-                base += table_bytes;
+            if index == host_index {
+                frames.take_front(table_frames);
             }
 
-            if end <= base {
-                continue;
+            if frames.len() > 0 {
+                regions[count] = frames;
+                count += 1;
             }
-
-            // len is at least Size4Kib::SIZE
-
-            regions[count] = Region {
-                base,
-                len: end - base,
-            };
-            count += 1;
         }
 
         let mut alloc = Self {
-            head: null_mut(),
+            head: None,
             regions,
-            hhdm_offset,
+            hhdm,
             count,
         };
         alloc.add_batch();
         alloc
     }
 
-    pub(crate) fn add_region(&mut self, base: usize, len: usize) {
-        assert!(self.count < self.regions.len());
-        let start = align_up(base as u64, Size4KiB::SIZE) as usize;
-        let end = align_down((base + len) as u64, Size4KiB::SIZE) as usize;
-
-        if end <= start {
+    /// Hands `frames` to the allocator. At most one call per region.
+    // TODO: could be unsafe marked
+    pub(crate) fn add_region(&mut self, frames: PhysMemoryFrameRange) {
+        if frames.len() == 0 {
             return;
         }
-
-        // len is at least Size4Kib::SIZE
-
-        self.regions[self.count] = Region {
-            base: start,
-            len: end - start,
-        };
+        assert!(self.count < self.regions.len(), "region table is full");
+        self.regions[self.count] = frames;
         self.count += 1;
     }
 
     fn add_batch(&mut self) -> bool {
         const FRAMES_PER_BATCH: usize = 1000;
 
-        // all regions have multiple of Size4Kib::SIZE bytes
-        let Some(region) = self.regions[..self.count].iter_mut().find(|r| r.len > 0) else {
+        let Some(region) = self.regions[..self.count].iter_mut().find(|r| r.len() > 0) else {
             return false;
         };
 
-        let bytes = (FRAMES_PER_BATCH * FRAME_4KIB_SIZE).min(region.len);
-
-        debug_assert_eq!(bytes % FRAME_4KIB_SIZE, 0);
-        debug_assert!(bytes >= FRAME_4KIB_SIZE);
-
-        let start = region.base;
-        region.base += bytes;
-        region.len -= bytes;
-
-        let mut addr = start + bytes;
-        while addr > start {
-            addr -= FRAME_4KIB_SIZE;
-            unsafe {
-                self.deallocate_frame(PhysFrame::containing_address(PhysAddr::new(addr as u64)));
-            }
+        // Pushed from the top, so the batch is handed out in ascending order.
+        for frame in region.take_front(FRAMES_PER_BATCH).rev() {
+            unsafe { self.deallocate_frame(conv::to_x86_frame(frame)) };
         }
         true
+    }
+
+    fn virt(&self, phys: PhysAddr) -> NonNull<usize> {
+        self.hhdm.ptr(phys).expect("frame outside the HHDM")
     }
 }
 
@@ -149,30 +137,33 @@ impl FrameDeallocator<Size4KiB> for LinkedListFrameAllocator {
         // TODO: we may wan to detect double frees here. Cant err right now anyways though.
         // TODO thus we should maybe just depend this in terms of arch-interfaces::mm::FrameDeallocator.
 
-        let addr = (frame.start_address().as_u64() + self.hhdm_offset as u64) as *mut u64;
-        unsafe { addr.write(self.head as u64) };
-        self.head = addr;
+        let addr = self.virt(conv::from_x86_frame(frame).get());
+        let next = self
+            .head
+            .map_or(0, |head| head.as_ptr().expose_provenance());
+        unsafe { addr.write(next) };
+        self.head = Some(addr);
     }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
         // get current frame from head and update head to point to next
-        if self.head.is_null() && !self.add_batch() {
+        if self.head.is_none() && !self.add_batch() {
             // tried to add more frames, but none are available
             return None;
         }
+        let head = self.head?;
 
-        let next_head_ptr = self.head;
-        let next_head = unsafe { *next_head_ptr };
-        let current_phys = self.head as u64 - self.hhdm_offset as u64;
-        self.head = next_head as *mut u64;
+        let next = unsafe { head.read() };
+        self.head = NonNull::new(core::ptr::with_exposed_provenance_mut(next));
 
-        let frame = PhysFrame::containing_address(PhysAddr::new(current_phys));
-        unsafe {
-            core::ptr::write_bytes(next_head_ptr.cast::<u8>(), 0, FRAME_4KIB_SIZE);
-        }
-        Some(frame)
+        let phys = self
+            .hhdm
+            .to_phys(VirtAddr::new(head.addr().get()))
+            .expect("free list entry outside the HHDM");
+        unsafe { head.cast::<u8>().write_bytes(0, FRAME_4KIB_SIZE) };
+        Some(conv::to_x86_frame(PhysMemoryFrame::containing(phys)))
     }
 }
 
@@ -206,9 +197,16 @@ mod tests {
         collections::BTreeSet,
         vec::Vec,
     };
-    use core::alloc::Layout;
+    use core::{alloc::Layout, num::NonZeroUsize};
 
-    use boot::memmap::{MEMMAP_ACPI_RECLAIMABLE, MEMMAP_RESERVED};
+    use boot::memmap::{
+        Entry,
+        MEMMAP_ACPI_RECLAIMABLE,
+        MEMMAP_BOOTLOADER_RECLAIMABLE,
+        MEMMAP_RESERVED,
+        MEMMAP_USABLE,
+    };
+    use kernel_types::aligned::AlignedRange;
     use proptest::prelude::*;
     use test_host::{config, panics};
 
@@ -224,7 +222,7 @@ mod tests {
     #[cfg(not(any(miri, loom, shuttle)))]
     const LIMITS: (usize, usize, usize) = (7, 8, 120);
 
-    /// Host memory standing in for physical memory, mapped at `hhdm_offset`.
+    /// Host memory standing in for physical memory, mapped at `hhdm`.
     struct Arena {
         ptr: *mut u8,
         pages: usize,
@@ -239,8 +237,10 @@ mod tests {
             Self { ptr, pages }
         }
 
-        fn hhdm_offset(&self) -> usize {
-            self.ptr as usize - PHYS_BASE
+        fn hhdm(&self) -> Hhdm {
+            let offset = NonZeroUsize::new(self.ptr.expose_provenance() - PHYS_BASE).unwrap();
+            // SAFETY: the arena backs `[PHYS_BASE, PHYS_BASE + pages * PAGE)` at this offset.
+            unsafe { Hhdm::new(offset) }
         }
 
         fn page(&self, phys: usize) -> &[u8] {
@@ -349,7 +349,7 @@ mod tests {
         let arena = Arena::new(spans.last().map_or(0, |s| s.first + s.pages));
         let entries: Vec<Entry> = spans.iter().map(Span::entry).collect();
         let map: Vec<&Entry> = entries.iter().collect();
-        let mut alloc = LinkedListFrameAllocator::new(&map, arena.hhdm_offset());
+        let mut alloc = LinkedListFrameAllocator::new(&MemoryMap::new(&map), arena.hhdm());
 
         let usable: BTreeSet<usize> = spans
             .iter()
@@ -360,7 +360,7 @@ mod tests {
             .iter()
             .filter(|s| matches!(s.ty, MEMMAP_USABLE | MEMMAP_BOOTLOADER_RECLAIMABLE))
             .count();
-        let table_pages = (tracked * size_of::<Region>()).div_ceil(PAGE);
+        let table_pages = (tracked * size_of::<PhysMemoryFrameRange>()).div_ceil(PAGE);
         let mut reclaimable = spans
             .iter()
             .filter(|s| s.ty == MEMMAP_BOOTLOADER_RECLAIMABLE);
@@ -401,7 +401,7 @@ mod tests {
                 Op::Reclaim => {
                     if let Some(span) = reclaimable.next() {
                         let (base, len) = span.reclaimed();
-                        alloc.add_region(base, len);
+                        alloc.add_region(frames_within(base, len));
                         candidates.extend(Span::pages_within(base, len));
                     }
                 }
@@ -437,7 +437,12 @@ mod tests {
     }
 
     fn frame_at(phys: usize) -> PhysFrame<Size4KiB> {
-        PhysFrame::containing_address(PhysAddr::new(phys as u64))
+        conv::to_x86_frame(PhysMemoryFrame::new(PhysAddr::new(phys)).unwrap())
+    }
+
+    /// The whole frames inside `[base, base + len)`, as handed over on reclaim.
+    fn frames_within(base: usize, len: usize) -> PhysMemoryFrameRange {
+        AlignedRange::within(PhysAddr::new(base), PhysAddr::new(base + len))
     }
 
     proptest! {
@@ -468,11 +473,11 @@ mod tests {
         let arena = Arena::new(6);
         let entries: Vec<Entry> = spans.iter().map(Span::entry).collect();
         let map: Vec<&Entry> = entries.iter().collect();
-        let mut alloc = LinkedListFrameAllocator::new(&map, arena.hhdm_offset());
+        let mut alloc = LinkedListFrameAllocator::new(&MemoryMap::new(&map), arena.hhdm());
 
         let (base, len) = spans[1].reclaimed();
-        alloc.add_region(base, len);
-        assert!(panics(|| alloc.add_region(base, len)));
+        alloc.add_region(frames_within(base, len));
+        assert!(panics(|| alloc.add_region(frames_within(base, len))));
     }
 
     /// Freeing a frame twice is reported instead of corrupting the free list.
@@ -482,7 +487,7 @@ mod tests {
         let arena = Arena::new(4);
         let entries = [span(0, 4, MEMMAP_USABLE).entry()];
         let map: Vec<&Entry> = entries.iter().collect();
-        let mut alloc = LinkedListFrameAllocator::new(&map, arena.hhdm_offset());
+        let mut alloc = LinkedListFrameAllocator::new(&MemoryMap::new(&map), arena.hhdm());
         let mut view = X86FrameAllocView(&mut alloc);
 
         let start = arch_interfaces::mm::FrameAllocator::allocate(&mut view)

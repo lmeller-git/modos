@@ -27,6 +27,7 @@ use irq_interfaces::{
     TriggerMode,
     x86::{CpuInfo, IoApicInfo, IsaOverride, LapicNmi, LapicNmiTable, NmiSource, NmiTarget},
 };
+use kernel_types::{addr::PhysAddr, hhdm::Hhdm};
 
 mod handler;
 pub use handler::KernelAcpiHandler;
@@ -83,16 +84,16 @@ impl From<ParseError> for InterruptConfigError {
 
 /// # Safety
 ///
-/// `rsdp_phys` must be the physical address of a valid RSDP and all tables it references must be
-/// readable through the HHDM at `hhdm`.
+/// `rsdp` must be the physical address of a valid RSDP and all tables it references must be
+/// readable through `hhdm`.
 pub unsafe fn parse(
-    hhdm: usize,
-    rsdp_phys: usize,
+    hhdm: Hhdm,
+    rsdp: PhysAddr,
     nanos_since_boot: NanosFn,
 ) -> Result<InterruptConfig, ParseError> {
     let handler = KernelAcpiHandler::new(hhdm, nanos_since_boot);
     let tables =
-        unsafe { AcpiTables::from_rsdp(handler, rsdp_phys) }.map_err(ParseError::Tables)?;
+        unsafe { AcpiTables::from_rsdp(handler, rsdp.as_usize()) }.map_err(ParseError::Tables)?;
     let AcpiPlatform {
         interrupt_model,
         processor_info,

@@ -30,7 +30,7 @@ use arch_interfaces::{
     },
 };
 use arch_x86_64_primitives::{CPUData, Primitive};
-use boot::{EarlyBootInfo, LateBootInfo, memmap::MEMMAP_BOOTLOADER_RECLAIMABLE, mp::BootCpu};
+use boot::{EarlyBootInfo, LateBootInfo, memmap::RegionKind, mp::BootCpu};
 use conquer_once::spin::OnceCell;
 use core_local::allocate_cls_block;
 use early_log::early_println;
@@ -314,9 +314,9 @@ extern "C" fn bsp_main(packet: &'static mut BSPReleaseData) -> ! {
         let mut frame_alloc = frame::FRAME_ALLOC.get().unwrap().lock();
         for region in memmap
             .iter()
-            .filter(|region| region.type_ == MEMMAP_BOOTLOADER_RECLAIMABLE)
+            .filter(|region| region.kind() == RegionKind::BootloaderReclaimable)
         {
-            frame_alloc.add_region(region.base as usize, region.length as usize);
+            frame_alloc.add_region(region.frames());
         }
     }
 
@@ -470,8 +470,9 @@ impl InterruptHandlerCapability for X86_64 {
 }
 
 fn early_init(boot_info: &EarlyBootInfo<'_>) {
-    page::init_pagetable(boot_info.hhdm_offset.unwrap());
-    frame::init_frame_alloc(boot_info.memmap.unwrap(), boot_info.hhdm_offset.unwrap());
+    let hhdm = boot_info.hhdm.unwrap();
+    page::init_pagetable(hhdm);
+    frame::init_frame_alloc(&boot_info.memmap.unwrap(), hhdm);
     init_xmm();
 }
 
@@ -507,21 +508,9 @@ fn late_init(boot_info: &LateBootInfo) {
     let my_cpu = boot_info
         .mp_info
         .as_ref()
-        .and_then(|info| info.cpus.iter().find(|cpu| cpu.is_bsp))
-        .unwrap_or(&fallback_bsp);
+        .map_or(&fallback_bsp, |info| info.cpus.bsp());
 
     let cpu_count = boot_info.mp_info.as_ref().map_or(1, |info| info.cpus.len());
-
-    #[cfg(debug_assertions)]
-    if let Some(info) = &boot_info.mp_info {
-        debug_assert!(
-            info.cpus
-                .iter()
-                .enumerate()
-                .all(|(index, cpu)| cpu.logical_id.value() == index),
-            "arch expects a dense and sorted logical id mapping"
-        );
-    }
 
     let cls_table: &'static [AtomicPtr<u8>] = Box::leak(
         (0..cpu_count)
@@ -541,13 +530,11 @@ fn late_init(boot_info: &LateBootInfo) {
 
     apic::timer::init_clock(boot_info.tsc_hz);
 
-    let hhdm = boot_info.hhdm_offset.unwrap();
-    let rsdp_virt = boot_info.rsdp_addr.unwrap().addr().get();
-    let rsdp_phys = rsdp_virt.checked_sub(hhdm).unwrap();
+    let hhdm = boot_info.hhdm.unwrap();
+    let rsdp = boot_info.rsdp.unwrap();
 
-    let config =
-        unsafe { TargetPlatform::parse_config(hhdm, rsdp_phys, apic::timer::nanos_since_boot) }
-            .expect("failed to discover the platform interrupt topology");
+    let config = unsafe { TargetPlatform::parse_config(hhdm, rsdp, apic::timer::nanos_since_boot) }
+        .expect("failed to discover the platform interrupt topology");
 
     let bsp_id = apic::init_bsp(config.lapic_phys, &config.lapic_nmi);
     if bsp_id != my_cpu.hw_id {

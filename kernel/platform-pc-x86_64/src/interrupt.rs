@@ -5,7 +5,7 @@
 
 use irq_interfaces::x86::IsaIrqCapability;
 use kernel_acpi::{InterruptConfig, InterruptConfigError, MapMmioFn, NanosFn};
-use kernel_types::cpu::CpuId;
+use kernel_types::{addr::PhysAddr, cpu::CpuId, hhdm::Hhdm};
 use platform_interfaces::interrupt::{InterruptControllerCapability, IrqError, IrqSpec, IrqTarget};
 
 use crate::{PcX86_64, ioapic, pic};
@@ -15,14 +15,13 @@ impl PcX86_64 {
     ///
     /// # Safety
     ///
-    /// `hhdm` must be the correct offset for the HHDM and must stay valid for
-    /// this call. `rsdp_phys` must point at a valid RSDP.
+    /// `rsdp` must point at a valid RSDP, and the tables it references must be mapped by `hhdm`.
     pub unsafe fn parse_config(
-        hhdm: usize,
-        rsdp_phys: usize,
+        hhdm: Hhdm,
+        rsdp: PhysAddr,
         nanos_since_boot: NanosFn,
     ) -> Result<InterruptConfig, InterruptConfigError> {
-        unsafe { kernel_acpi::parse(hhdm, rsdp_phys, nanos_since_boot) }.map_err(Into::into)
+        unsafe { kernel_acpi::parse(hhdm, rsdp, nanos_since_boot) }.map_err(Into::into)
     }
 
     /// Bring up the platform interrupt controllers.

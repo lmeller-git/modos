@@ -1,6 +1,10 @@
 use alloc::boxed::Box;
-use core::ptr::NonNull;
+use core::num::NonZeroUsize;
 
+use kernel_types::{
+    addr::{PhysAddr, VirtAddr},
+    hhdm::Hhdm,
+};
 use limine::{
     BaseRevision,
     RequestsEndMarker,
@@ -23,7 +27,8 @@ use crate::{
     BootLoaderInfo,
     EarlyBootInfo,
     LateBootInfo,
-    mp::{BootCpu, CpuEntry, MpBootInfo, assign_logical_ids},
+    memmap::MemoryMap,
+    mp::{BootCpu, CpuEntry, CpuTable, MpBootInfo},
 };
 
 /// Sets the base revision to the latest revision supported by the crate.
@@ -32,7 +37,10 @@ use crate::{
 #[used]
 // The .requests section allows limine to find the requests faster and more safely.
 #[unsafe(link_section = ".requests")]
-static BASE_REVISION: BaseRevision = BaseRevision::new();
+static BASE_REVISION: BaseRevision = BaseRevision::with_revision(REVISION);
+
+/// Requested base revision; `build_early_bootinfo` refuses any other.
+const REVISION: u64 = BaseRevision::MAX_SUPPORTED;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -88,37 +96,63 @@ pub(crate) fn build_early_bootinfo<'a>() -> EarlyBootInfo<'a> {
         version: response.version(),
     });
 
-    let memmap = MEMORY_MAP_REQUEST.response().map(
-        |response| // SAFETY: crate::Entry is the same repr(C) struct as used in limine
-    unsafe { core::mem::transmute(response.entries()) },
-    );
+    let memmap = MEMORY_MAP_REQUEST.response().map(|response| {
+        // SAFETY: crate::Entry is the same repr(C) struct as used in limine
+        let entries = unsafe {
+            core::mem::transmute::<&[&limine::memmap::Entry], &[&crate::memmap::Entry]>(
+                response.entries(),
+            )
+        };
+        MemoryMap::new(entries)
+    });
 
     let tsc_hz = TSC_REQUEST.response().map(|r| r.frequency);
 
+    let hhdm = HHDM_REQUEST.response().and_then(|response| {
+        let offset = NonZeroUsize::new(usize::try_from(response.offset).ok()?)?;
+        // SAFETY: Limine maps physical memory at its reported HHDM offset.
+        Some(unsafe { Hhdm::new(offset) })
+    });
+
+    let rsdp = RSDP_REQUEST
+        .response()
+        .and_then(|response| rsdp_phys(response.address.addr(), hhdm));
+
     EarlyBootInfo {
-        hhdm_offset: HHDM_REQUEST
-            .response()
-            .map(|response| response.offset as usize),
+        hhdm,
         bootloader_info: boot_info,
-        rsdp_addr: RSDP_REQUEST
-            .response()
-            .and_then(|response| NonNull::new(response.address)),
+        rsdp,
         memmap,
         tsc_hz,
     }
 }
 
+/// The RSDP response is physical under base revision 3 and an HHDM address otherwise.
+fn rsdp_phys(addr: usize, hhdm: Option<Hhdm>) -> Option<PhysAddr> {
+    if addr == 0 {
+        None
+    } else if REVISION == 3 {
+        Some(PhysAddr::new(addr))
+    } else {
+        hhdm?.to_phys(VirtAddr::new(addr))
+    }
+}
+
 pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInfo {
-    let mp_info = MP_REQUEST.response().map(|response| MpBootInfo {
-        flags: response.flags,
-        cpus: assign_logical_ids(
+    let mp_info = MP_REQUEST.response().map(|response| {
+        let cpus = CpuTable::from_raw(
             response
                 .cpus()
                 .iter()
                 .map(|core_data| (u64::from(core_data.processor_id), core_data.lapic_id)),
             response.bsp_lapic_id,
-        ),
-        start_cpu,
+        )
+        .unwrap_or_else(|err| panic!("invalid cpu list from the bootloader: {err}"));
+        MpBootInfo {
+            flags: response.flags,
+            cpus,
+            start_cpu,
+        }
     });
 
     let bootloader_info = early_boot
@@ -130,12 +164,10 @@ pub(crate) fn build_late_bootinfo(early_boot: &EarlyBootInfo<'_>) -> LateBootInf
         });
 
     LateBootInfo {
-        hhdm_offset: early_boot.hhdm_offset,
+        hhdm: early_boot.hhdm,
         bootloader_info,
-        rsdp_addr: early_boot.rsdp_addr,
-        memmap: early_boot
-            .memmap
-            .map(|memap| memap.iter().map(|&&x| x).collect()),
+        rsdp: early_boot.rsdp,
+        memmap: early_boot.memmap.map(|memmap| memmap.regions().collect()),
         mp_info,
         tsc_hz: early_boot.tsc_hz,
     }

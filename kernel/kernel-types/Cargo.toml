@@ -10,6 +10,10 @@ documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["hhdm"]
+hhdm = []
+
 [dependencies]
 derive_more = { workspace = true }
 

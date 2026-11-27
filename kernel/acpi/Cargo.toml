@@ -16,6 +16,7 @@ categories.workspace = true
 # aml = ["acpi/aml"]
 
 [dependencies]
+kernel-types = { path = "../kernel-types" }
 acpi = { version = "6.1.0", default-features = false, features = ["alloc", "aml"] }
 irq-interfaces = { path = "../irq-interfaces" }
 

@@ -2,9 +2,10 @@
 
 // TODO: currently just uses the bootloaders hhdm. Write back MMIO will need uncached mapping equivalent to apic setup.
 
-use core::{hint::spin_loop, ptr::NonNull};
+use core::hint::spin_loop;
 
 use acpi::{Handler, PciAddress, PhysicalMapping};
+use kernel_types::{addr::PhysAddr, hhdm::Hhdm};
 use x86_64::instructions::port::Port;
 
 use crate::NanosFn;
@@ -43,12 +44,12 @@ volatile_access!(read_u64, write_u64, u64);
 
 #[derive(Clone, Copy)]
 pub struct KernelAcpiHandler {
-    hhdm: usize,
+    hhdm: Hhdm,
     nanos_since_boot: NanosFn,
 }
 
 impl KernelAcpiHandler {
-    pub const fn new(hhdm: usize, nanos_since_boot: NanosFn) -> Self {
+    pub const fn new(hhdm: Hhdm, nanos_since_boot: NanosFn) -> Self {
         Self {
             hhdm,
             nanos_since_boot,
@@ -57,8 +58,10 @@ impl KernelAcpiHandler {
 
     #[inline]
     fn virt(&self, phys: usize) -> usize {
-        phys.checked_add(self.hhdm)
+        self.hhdm
+            .to_virt(PhysAddr::new(phys))
             .expect("ACPI physical address overflows the HHDM")
+            .as_usize()
     }
 }
 
@@ -72,7 +75,10 @@ impl Handler for KernelAcpiHandler {
         physical_address
             .checked_add(size)
             .expect("ACPI region wraps the physical address space");
-        let virt = NonNull::new(self.virt(physical_address) as *mut T).expect("null ACPI mapping");
+        let virt = self
+            .hhdm
+            .ptr(PhysAddr::new(physical_address))
+            .expect("ACPI physical address overflows the HHDM");
         PhysicalMapping {
             physical_start: physical_address,
             virtual_start: virt,
@@ -202,6 +208,8 @@ impl Handler for KernelAcpiHandler {
 
 #[cfg(test)]
 mod tests {
+    use core::num::NonZeroUsize;
+
     use proptest::prelude::*;
     use test_host::config;
 
@@ -209,9 +217,14 @@ mod tests {
 
     const PHYS: usize = 0x1000;
 
+    fn hhdm(offset: usize) -> Hhdm {
+        // SAFETY: tests only access memory they mapped at `offset`.
+        unsafe { Hhdm::new(NonZeroUsize::new(offset).unwrap()) }
+    }
+
     /// A handler whose "physical memory" at `PHYS..` is `mem`.
     fn over(mem: &mut [u64]) -> KernelAcpiHandler {
-        KernelAcpiHandler::new(mem.as_mut_ptr() as usize - PHYS, || 0)
+        KernelAcpiHandler::new(hhdm(mem.as_mut_ptr().expose_provenance() - PHYS), || 0)
     }
 
     fn bytes(mem: &[u64]) -> alloc::vec::Vec<u8> {
@@ -254,13 +267,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "overflows the HHDM")]
     fn address_overflowing_hhdm() {
-        KernelAcpiHandler::new(usize::MAX, || 0).read_u8(1);
+        KernelAcpiHandler::new(hhdm(usize::MAX), || 0).read_u8(1);
     }
 
     #[test]
     #[should_panic(expected = "wraps the physical address space")]
     fn region_wrapping() {
-        let h = KernelAcpiHandler::new(0, || 0);
+        let h = KernelAcpiHandler::new(hhdm(1), || 0);
         let _ = unsafe { h.map_physical_region::<u8>(usize::MAX - 3, 8) };
     }
 }

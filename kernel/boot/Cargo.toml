@@ -12,6 +12,7 @@ limine = ["dep:limine"]
 
 [dependencies]
 kernel-types = { path = "../kernel-types" }
+derive_more = { workspace = true }
 limine = { version = "0.6.5", optional = true }
 
 [dev-dependencies]
